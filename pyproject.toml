@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nervous-machine"
+version = "0.1.0.dev1"
+description = "The GitHub of Causal Learning — build causal models, validate against reality, inject into frozen base models via LoRA."
+license = {text = "Proprietary"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Nervous Machine"}
+]
+keywords = ["causal-learning", "mcp", "lora", "causal-inference", "nervous-machine"]
+
+# No dependencies required for the demo — dry-run mode uses only stdlib.
+# When connected to live MCP servers, install: pip install anthropic python-dotenv
+dependencies = []
+
+[project.optional-dependencies]
+live = [
+    "anthropic>=0.40.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+nm = "nm:main"
+
+[tool.setuptools]
+py-modules = ["nm"]
