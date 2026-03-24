@@ -1,49 +1,53 @@
-# Space — Thermospheric Density Causal Prior
+# Manufacturing — Process Quality Causal Prior
 
 ## Domain
-Low Earth Orbit (LEO) thermospheric density modeling for satellite drag prediction.
+CNC machining cell producing aluminum aerospace brackets. Per-line quality prediction and root cause attribution for dimensional tolerance drift.
 
 ## Context
-Operational models (e.g., JB2008, NRLMSISE-00) predict bulk thermospheric density but lack driver-resolved attribution. They cannot tell an operator which driver caused a density spike, how long its influence persists, or how perturbations propagate across orbital shells. This prior seeds a voxel-level causal model that decomposes density into individual physical drivers.
+Quality models are trained on aggregate data across lines and shifts. They flag out-of-spec parts but cannot attribute the root cause to a specific driver for a specific line. This prior seeds a per-line causal model that learns the actual relationships between process parameters and dimensional outcomes.
 
 ## Causal Hypotheses
 
-### Solar EUV Flux → Thermospheric Density
-- Solar EUV heats the upper atmosphere, increasing scale height and density at satellite altitudes.
-- F10.7 index is the standard proxy; S10.7 (EUV-specific) provides better temporal resolution.
-- Influence is quasi-steady-state with ~1-day propagation lag from solar disk to thermospheric response.
-- Expected weight: dominant driver under quiet geomagnetic conditions.
+### Tool Wear → Dimensional Drift
+- Progressive flank wear increases cutting forces and deflects the workpiece.
+- Simulation assumes nominal tool geometry; real tools degrade non-linearly.
+- Expected signature: monotonic drift in critical dimensions, accelerating after ~70% of tool life.
+- Wear rate varies by material batch hardness, coolant condition, and feed rate.
+- Expected weight: primary driver of dimensional drift over a tool's life cycle.
 
-### Geomagnetic Activity → Thermospheric Density
-- Geomagnetic storms (Kp, Dst) drive rapid density enhancements via Joule heating and particle precipitation.
-- Response onset within 1–3 hours; recovery timescale 1–5 days depending on storm intensity.
-- Density enhancement is latitude-dependent: strongest at high latitudes, propagating equatorward.
-- Expected weight: dominant driver during storm conditions; secondary during quiet periods.
+### Ambient Temperature → Thermal Growth
+- Machine structure (cast iron bed, ball screws, spindle) expands with temperature.
+- Shop floor temperature varies 5–10°C diurnally; more during seasonal transitions.
+- Simulation assumes 20°C reference. Real parts are machined on thermally drifting machines.
+- Expected signature: systematic bias in Z-axis dimensions correlated with ambient temperature, worst during morning warm-up.
+- Expected weight: moderate; dominant during first 2 hours of each shift.
 
-### Solar Wind Dynamic Pressure → Thermospheric Density
-- Solar wind ram pressure modulates magnetospheric compression, indirectly affecting thermospheric energy input.
-- Influence is weaker than direct EUV or geomagnetic pathways but provides early-warning signal (upstream).
-- Lag structure: 30–90 minutes from L1 measurement to thermospheric response.
-- Expected weight: low-to-moderate; primarily a leading indicator.
+### Material Batch Hardness → Cutting Force Variation
+- Aluminum alloy hardness varies ±8% between supplier batches and within billets.
+- Harder material → higher cutting forces → more deflection → different dimensional outcome.
+- QC measures hardness per incoming lot but process models don't use it as a real-time input.
+- Expected signature: step change in dimensional bias coinciding with batch changeover.
+- Expected weight: moderate; episodic but significant when present.
 
-### Seasonal-Latitudinal Pattern → Thermospheric Density
-- Annual and semi-annual variations driven by solar declination, thermospheric composition changes, and interhemispheric transport.
-- Known semi-annual anomaly: density maxima near equinoxes, minima near solstices.
-- Latitude-dependent: different voxels experience different seasonal amplitudes.
-- Expected weight: moderate; provides baseline modulation.
+### Coolant Concentration → Surface Finish & Tool Life
+- Coolant degrades over time: concentration drops, tramp oil accumulates, pH drifts.
+- Low concentration → poor lubricity → accelerated tool wear → dimensional and surface finish degradation.
+- Refractometer readings taken daily; actual concentration varies within the day.
+- Expected signature: correlated degradation in surface finish and accelerated dimensional drift between coolant changes.
+- Expected weight: low-to-moderate as direct driver; amplifies tool wear pathway.
 
-### Joule Heating → Thermospheric Density
-- High-latitude Joule heating from auroral electrojet currents produces localized density enhancements.
-- Proxy: Hemispheric Power Index (HPI) or auroral electrojet index (AE).
-- Propagation: equatorward via traveling atmospheric disturbances (TADs) on ~2–6 hour timescales.
-- Expected weight: significant at high latitudes; attenuated but measurable at mid-latitudes.
+### Fixture Clamping Force → Part Distortion
+- Thin-wall brackets distort under clamping. Distortion relaxes after unclamping, causing dimensional shift.
+- Clamping force set once per setup; actual hydraulic pressure drifts with temperature and seal wear.
+- Expected signature: intermittent dimensional outliers in thin-wall features, correlated with clamping pressure sensor readings.
+- Expected weight: low under normal conditions; diagnostic flag for fixture maintenance.
 
 ## Expected Interactions
-- EUV and geomagnetic activity are partially correlated (both solar-driven) but operate on different timescales.
-- Joule heating is a sub-mechanism of geomagnetic activity; the model should learn whether it adds independent explanatory power.
-- Seasonal pattern modulates the baseline that all other drivers perturb.
+- Tool wear and material hardness are coupled: harder batches accelerate wear, compounding dimensional drift.
+- Ambient temperature affects both machine thermal growth and coolant viscosity.
+- Coolant degradation amplifies tool wear, creating a compounding effect over days.
 
 ## Known Gaps
-- Sub-voxel density gradients (within a single orbital shell) are not resolved at TLE cadence.
-- Nightside density response may have different lag structure than dayside.
-- Neutral wind effects on drag are not captured by density alone.
+- Spindle bearing preload changes with thermal state; may contribute unattributed Z-axis error.
+- Chip evacuation effectiveness varies with geometry and may cause intermittent re-cutting.
+- Workholding repeatability (part-to-part positioning variance) is assumed constant but may not be.
