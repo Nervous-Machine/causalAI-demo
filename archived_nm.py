@@ -184,252 +184,6 @@ def chat_loop(system_prompt, initial_context, mcp_servers=None):
 
 
 # ─────────────────────────────────────────────
-# Domain Examples
-# ─────────────────────────────────────────────
-
-AVAILABLE_DOMAINS = {
-    "space": "Thermospheric density modeling for satellite drag prediction",
-    "robotics": "Sim-to-real calibration for robotic arm dynamics",
-    "manufacturing": "CNC machining process quality and root cause attribution",
-    "data-centers": "Per-zone thermal management and cooling optimization",
-}
-
-# Domain-specific dry-run data for init (nodes + edges)
-DOMAIN_INIT_DATA = {
-    "space": {
-        "domain_id": "thermospheric_density",
-        "nodes": [
-            ("solar_euv_flux",            "driver",     "SFU"),
-            ("geomagnetic_activity",      "driver",     "nT"),
-            ("solar_wind_pressure",       "driver",     "nPa"),
-            ("seasonal_latitudinal",      "driver",     "factor"),
-            ("joule_heating",             "driver",     "GW"),
-            ("thermospheric_density",     "outcome",    "kg/m³"),
-            ("satellite_drag",            "outcome",    "m/s²"),
-            ("collision_avoidance_event", "outcome",    "boolean"),
-        ],
-        "edges": [
-            ("solar_euv_flux",       "thermospheric_density",  0.40, "known mechanism"),
-            ("geomagnetic_activity", "thermospheric_density",  0.35, "known mechanism"),
-            ("solar_wind_pressure",  "thermospheric_density",  0.25, "LLM hypothesis"),
-            ("seasonal_latitudinal", "thermospheric_density",  0.35, "empirical pattern"),
-            ("joule_heating",        "thermospheric_density",  0.30, "LLM hypothesis"),
-            ("thermospheric_density","satellite_drag",         0.40, "physics law"),
-            ("satellite_drag",       "collision_avoidance_event", 0.30, "operational link"),
-        ],
-        "semantic": [
-            ("solar_euv_flux",       "IS_A",       "solar_forcing"),
-            ("geomagnetic_activity", "IS_A",       "magnetospheric_coupling"),
-            ("joule_heating",        "PART_OF",    "geomagnetic_activity"),
-            ("satellite_drag",       "RELATED_TO", "collision_avoidance_event"),
-        ],
-    },
-    "robotics": {
-        "domain_id": "sim_to_real_calibration",
-        "nodes": [
-            ("joint_friction_drift",   "driver",       "N·m"),
-            ("payload_mass_variation", "driver",       "g"),
-            ("ambient_temperature",    "driver",       "°C"),
-            ("surface_condition",      "driver",       "coeff"),
-            ("controller_latency",     "driver",       "µs"),
-            ("trajectory_error",       "outcome",      "mm"),
-            ("grasp_force_error",      "outcome",      "N"),
-            ("cycle_failure",          "outcome",      "boolean"),
-        ],
-        "edges": [
-            ("joint_friction_drift",   "trajectory_error",  0.35, "known mechanism"),
-            ("payload_mass_variation", "grasp_force_error", 0.40, "known mechanism"),
-            ("ambient_temperature",    "joint_friction_drift", 0.25, "LLM hypothesis"),
-            ("surface_condition",      "grasp_force_error", 0.25, "LLM hypothesis"),
-            ("controller_latency",     "trajectory_error",  0.30, "suspected link"),
-            ("trajectory_error",       "cycle_failure",     0.35, "operational link"),
-            ("grasp_force_error",      "cycle_failure",     0.35, "operational link"),
-        ],
-        "semantic": [
-            ("joint_friction_drift",   "IS_A",       "mechanical_degradation"),
-            ("payload_mass_variation", "IS_A",       "load_variation"),
-            ("controller_latency",     "PART_OF",    "control_system"),
-            ("trajectory_error",       "RELATED_TO", "grasp_force_error"),
-        ],
-    },
-    "manufacturing": {
-        "domain_id": "cnc_process_quality",
-        "nodes": [
-            ("tool_wear",              "driver",       "mm"),
-            ("ambient_temperature",    "driver",       "°C"),
-            ("material_batch_hardness","driver",       "HRB"),
-            ("coolant_concentration",  "driver",       "%"),
-            ("fixture_clamping_force", "driver",       "bar"),
-            ("dimensional_deviation",  "outcome",      "mm"),
-            ("surface_roughness",      "outcome",      "µm_Ra"),
-            ("scrap_event",            "outcome",      "boolean"),
-        ],
-        "edges": [
-            ("tool_wear",              "dimensional_deviation",  0.40, "known mechanism"),
-            ("ambient_temperature",    "dimensional_deviation",  0.30, "thermal growth"),
-            ("material_batch_hardness","dimensional_deviation",  0.30, "LLM hypothesis"),
-            ("coolant_concentration",  "surface_roughness",      0.25, "LLM hypothesis"),
-            ("coolant_concentration",  "tool_wear",              0.25, "suspected link"),
-            ("fixture_clamping_force", "dimensional_deviation",  0.20, "LLM hypothesis"),
-            ("dimensional_deviation",  "scrap_event",            0.35, "operational link"),
-        ],
-        "semantic": [
-            ("tool_wear",              "IS_A",       "progressive_degradation"),
-            ("material_batch_hardness","IS_A",       "material_property"),
-            ("coolant_concentration",  "RELATED_TO", "tool_wear"),
-            ("dimensional_deviation",  "RELATED_TO", "surface_roughness"),
-        ],
-    },
-    "data-centers": {
-        "domain_id": "thermal_management",
-        "nodes": [
-            ("it_workload",            "driver",       "kW"),
-            ("crac_airflow",           "driver",       "CFM"),
-            ("ambient_temperature",    "driver",       "°C"),
-            ("rack_configuration",     "driver",       "score"),
-            ("floor_tile_layout",      "driver",       "open_%"),
-            ("zone_temperature",       "outcome",      "°C"),
-            ("cooling_power",          "outcome",      "kW"),
-            ("thermal_alarm",          "outcome",      "boolean"),
-        ],
-        "edges": [
-            ("it_workload",            "zone_temperature",  0.40, "known mechanism"),
-            ("crac_airflow",           "zone_temperature",  0.40, "known mechanism"),
-            ("ambient_temperature",    "zone_temperature",  0.30, "economizer link"),
-            ("rack_configuration",     "zone_temperature",  0.25, "recirculation"),
-            ("floor_tile_layout",      "zone_temperature",  0.25, "airflow distribution"),
-            ("zone_temperature",       "cooling_power",     0.35, "control response"),
-            ("zone_temperature",       "thermal_alarm",     0.30, "threshold trigger"),
-        ],
-        "semantic": [
-            ("it_workload",            "IS_A",       "heat_source"),
-            ("crac_airflow",           "IS_A",       "cooling_mechanism"),
-            ("rack_configuration",     "RELATED_TO", "floor_tile_layout"),
-            ("zone_temperature",       "RELATED_TO", "cooling_power"),
-        ],
-    },
-}
-
-# Domain-specific dry-run data for validate (endpoints)
-DOMAIN_VALIDATE_DATA = {
-    "space": {
-        "endpoints": [
-            ("grace_fo_accelerometer", "podaac.jpl.nasa.gov", "density, altitude, lat/lon", "10min", "READY"),
-            ("tle_debris_catalog",     "space-track.org",     "ballistic coeff, inferred density", "1-3 day", "READY"),
-            ("swpc_solar_wind",        "services.swpc.noaa.gov", "density, speed, Bz, temperature", "1min", "READY"),
-        ],
-    },
-    "robotics": {
-        "endpoints": [
-            ("joint_encoder_rtde",     "192.168.1.100:30004", "positions, velocities, torques (6-DOF)", "1ms", "READY"),
-            ("ft_sensor_wrist",        "192.168.1.60:8080",   "force/torque Fx,Fy,Fz,Tx,Ty,Tz", "100Hz", "READY"),
-            ("environment_sensor",     "192.168.1.70:8080",   "ambient temp, humidity", "1min", "READY"),
-        ],
-    },
-    "manufacturing": {
-        "endpoints": [
-            ("cmm_inspection",         "192.168.10.20:8080",  "feature deviations, nominal vs actual", "per-part", "READY"),
-            ("cnc_mtconnect",          "192.168.10.10:5000",  "spindle load, feed rate, axis positions", "100Hz", "READY"),
-            ("coolant_monitor",        "192.168.10.50:8080",  "concentration, pH, tramp oil, temp", "hourly", "READY"),
-        ],
-    },
-    "data-centers": {
-        "endpoints": [
-            ("rack_inlet_sensors",     "dcim.local:8080",     "per-rack inlet temp (top/mid/bottom)", "1min", "READY"),
-            ("intelligent_pdus",       "dcim.local:8080",     "per-rack power kW, current, voltage", "1min", "READY"),
-            ("bms_crac_telemetry",     "bms.local:47808",     "supply/return temp, fan speed, mode", "1min", "READY"),
-        ],
-    },
-}
-
-
-def detect_domain(prior_text=None):
-    """Detect domain from prior.md content. Returns domain key or 'default'."""
-    if prior_text is None:
-        for path in [Path("prior.md"), Path("examples/prior.md")]:
-            if path.exists():
-                prior_text = path.read_text()
-                break
-    if prior_text:
-        text_lower = prior_text.lower()
-        if any(kw in text_lower for kw in ["thermospher", "satellite", "orbital", "voxel", "drag", "euv"]):
-            return "space"
-        elif any(kw in text_lower for kw in ["robot", "joint", "sim-to-real", "grasp", "trajectory", "end-effector"]):
-            return "robotics"
-        elif any(kw in text_lower for kw in ["cnc", "machining", "tool wear", "coolant", "surface roughness", "fixture"]):
-            return "manufacturing"
-        elif any(kw in text_lower for kw in ["data center", "rack", "crac", "pue", "thermal zone", "hot aisle"]):
-            return "data-centers"
-    return "default"
-
-
-def cmd_example(args):
-    """Copy domain-specific prior.md and validate.md into the current directory."""
-    domain = args.domain
-
-    if domain == "list":
-        print("  Available domain examples:")
-        print()
-        for name, desc in AVAILABLE_DOMAINS.items():
-            print(f"    {name:<20} {desc}")
-        print()
-        print("  Usage: nm example <domain>")
-        print("  This copies prior.md and validate.md into your current directory.")
-        return
-
-    if domain not in AVAILABLE_DOMAINS:
-        print(f"  ✗ Unknown domain: {domain}")
-        print(f"  Available: {', '.join(AVAILABLE_DOMAINS.keys())}")
-        print(f"  Run 'nm example list' to see descriptions.")
-        return
-
-    # Find example files — check both examples/<domain>/ paths
-    example_dir = None
-    for candidate in [Path("examples") / domain, Path(__file__).parent / "examples" / domain]:
-        if candidate.exists():
-            example_dir = candidate
-            break
-
-    if example_dir is None:
-        print(f"  ✗ Example directory not found for '{domain}'.")
-        print(f"  Expected: examples/{domain}/prior.md and examples/{domain}/validate.md")
-        return
-
-    prior_src = example_dir / "prior.md"
-    validate_src = example_dir / "validate.md"
-    copied = []
-
-    for src, dst_name in [(prior_src, "prior.md"), (validate_src, "validate.md")]:
-        if src.exists():
-            dst = Path(dst_name)
-            if dst.exists():
-                print(f"  ⚠ {dst_name} already exists. Overwrite? [y/N] ", end="", flush=True)
-                try:
-                    answer = input().strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return
-                if answer != "y":
-                    print(f"    Skipped {dst_name}")
-                    continue
-            dst.write_text(src.read_text())
-            copied.append(dst_name)
-            print(f"  ✓ Copied {dst_name}  ← examples/{domain}/{dst_name}")
-        else:
-            print(f"  ⚠ {src} not found, skipping")
-
-    if copied:
-        print()
-        print(f"  Domain: {AVAILABLE_DOMAINS[domain]}")
-        print()
-        print(f"  Next steps:")
-        print(f"    nm init          # build causal graph from {domain} prior")
-        print(f"    nm validate      # connect {domain} validation endpoints")
-        print(f"    nm review        # interactive review of prior + validation")
-        print(f"    nm learn --cycles 5")
-
-
-# ─────────────────────────────────────────────
 # Commands
 # ─────────────────────────────────────────────
 
@@ -469,64 +223,60 @@ then all causal edges with appropriate certainty levels, then semantic relations
     print()
 
     if not CVOT_MCP_URL:
-        domain = detect_domain(prior_prompt)
-        data = DOMAIN_INIT_DATA.get(domain)
-
-        if data:
-            print(f"  BUILDING CAUSAL GRAPH  [{domain}]")
-            print(f"  Parsed {len(prior_prompt.splitlines())} lines from {args.prior}")
-            print()
-            print(f"  NODES CREATED ({len(data['nodes'])}):")
-            for i, (nid, ntype, unit) in enumerate(data['nodes']):
-                prefix = "└──" if i == len(data['nodes']) - 1 else "├──"
-                print(f"  {prefix} {nid:<35} type: {ntype:<15} unit: {unit}")
-            print()
-            print(f"  CAUSAL EDGES ({len(data['edges'])}):")
-            for i, (src, tgt, z, note) in enumerate(data['edges']):
-                prefix = "└──" if i == len(data['edges']) - 1 else "├──"
-                print(f"  {prefix} {src} → {tgt:<30} Z={z:.2f}  ({note})")
-            print()
-            print(f"  SEMANTIC EDGES ({len(data['semantic'])}):")
-            for i, (src, rel, tgt) in enumerate(data['semantic']):
-                prefix = "└──" if i == len(data['semantic']) - 1 else "├──"
-                print(f"  {prefix} {src:<30} {rel:<12} {tgt}")
-            print()
-            low_z = sum(1 for _, _, z, _ in data['edges'] if z < 0.50)
-            print(f"  {low_z} edges flagged for validation (all Z < 0.50)")
-            print()
-            print(f"  ✓ Causal prior built [{domain}]. Run 'nm validate' to set up error signals.")
-        else:
-            # Default MCU example (original)
-            print("  BUILDING CAUSAL GRAPH")
-            print(f"  Parsed {len(prior_prompt.splitlines())} lines from {args.prior}")
-            print()
-            print("  NODES CREATED (8):")
-            print("  ├── thermal_cycling              type: stressor")
-            print("  ├── voltage_ripple               type: stressor")
-            print("  ├── vibration_exposure            type: stressor")
-            print("  ├── solder_joint_fatigue          type: failure_mode")
-            print("  ├── capacitor_esr_drift           type: failure_mode")
-            print("  ├── clock_jitter                  type: symptom")
-            print("  ├── watchdog_reset                type: symptom")
-            print("  └── mcu_functional_failure        type: outcome")
-            print()
-            print("  CAUSAL EDGES (6):")
-            print("  ├── thermal_cycling → solder_joint_fatigue     Z=0.30  (LLM hypothesis)")
-            print("  ├── thermal_cycling → capacitor_esr_drift      Z=0.35  (datasheet ref)")
-            print("  ├── voltage_ripple → clock_jitter              Z=0.40  (known mechanism)")
-            print("  ├── vibration_exposure → solder_joint_fatigue  Z=0.25  (LLM hypothesis)")
-            print("  ├── solder_joint_fatigue → watchdog_reset      Z=0.30  (LLM hypothesis)")
-            print("  └── capacitor_esr_drift → mcu_functional_failure Z=0.35  (datasheet ref)")
-            print()
-            print("  SEMANTIC EDGES (4):")
-            print("  ├── solder_joint_fatigue  IS_A      mechanical_failure")
-            print("  ├── capacitor_esr_drift   IS_A      electrical_degradation")
-            print("  ├── clock_jitter          PART_OF   timing_subsystem")
-            print("  └── watchdog_reset        RELATED_TO mcu_functional_failure")
-            print()
-            print("  6 edges flagged for validation (all Z < 0.50)")
-            print()
-            print("  ✓ Causal prior built. Run 'nm validate' to set up error signals.")
+        print("  BUILDING CAUSAL GRAPH")
+        print(f"  Parsed {len(prior_prompt.splitlines())} lines from {args.prior}")
+        print()
+        print("  NODES CREATED (8):")
+        print("  ├── thermal_cycling              type: stressor")
+        print("  ├── voltage_ripple               type: stressor")
+        print("  ├── vibration_exposure            type: stressor")
+        print("  ├── solder_joint_fatigue          type: failure_mode")
+        print("  ├── capacitor_esr_drift           type: failure_mode")
+        print("  ├── clock_jitter                  type: symptom")
+        print("  ├── watchdog_reset                type: symptom")
+        print("  └── mcu_functional_failure        type: outcome")
+        print()
+        print("  CAUSAL EDGES (6):")
+        print("  ├── thermal_cycling → solder_joint_fatigue     Z=0.30  (LLM hypothesis)")
+        print("  ├── thermal_cycling → capacitor_esr_drift      Z=0.35  (datasheet ref)")
+        print("  ├── voltage_ripple → clock_jitter              Z=0.40  (known mechanism)")
+        print("  ├── vibration_exposure → solder_joint_fatigue  Z=0.25  (LLM hypothesis)")
+        print("  ├── solder_joint_fatigue → watchdog_reset      Z=0.30  (LLM hypothesis)")
+        print("  └── capacitor_esr_drift → mcu_functional_failure Z=0.35  (datasheet ref)")
+        print()
+        print("  SEMANTIC EDGES (4):")
+        print("  ├── solder_joint_fatigue  IS_A      mechanical_failure")
+        print("  ├── capacitor_esr_drift   IS_A      electrical_degradation")
+        print("  ├── clock_jitter          PART_OF   timing_subsystem")
+        print("  └── watchdog_reset        RELATED_TO mcu_functional_failure")
+        print()
+        print("  6 edges flagged for validation (all Z < 0.50)")
+        print()
+        print("  ── REVIEWABLE: Causal Graph (what your experts approve) ──")
+        print()
+        print('  {')
+        print('    "domain": "mcu_reliability",')
+        print('    "nodes": [')
+        print('      {"id": "thermal_cycling",        "type": "stressor",      "unit": "cycles"},')
+        print('      {"id": "voltage_ripple",         "type": "stressor",      "unit": "mV_pp"},')
+        print('      {"id": "vibration_exposure",     "type": "stressor",      "unit": "g_rms"},')
+        print('      {"id": "solder_joint_fatigue",   "type": "failure_mode",  "unit": "crack_um"},')
+        print('      {"id": "capacitor_esr_drift",    "type": "failure_mode",  "unit": "mohm"},')
+        print('      {"id": "clock_jitter",           "type": "symptom",       "unit": "ps"},')
+        print('      {"id": "watchdog_reset",         "type": "symptom",       "unit": "count"},')
+        print('      {"id": "mcu_functional_failure", "type": "outcome",       "unit": "boolean"}')
+        print('    ],')
+        print('    "edges": [')
+        print('      {"source": "thermal_cycling",   "target": "solder_joint_fatigue",   "Z": 0.30},')
+        print('      {"source": "thermal_cycling",   "target": "capacitor_esr_drift",    "Z": 0.35},')
+        print('      {"source": "voltage_ripple",    "target": "clock_jitter",            "Z": 0.40},')
+        print('      {"source": "vibration_exposure","target": "solder_joint_fatigue",    "Z": 0.25},')
+        print('      {"source": "solder_joint_fatigue","target": "watchdog_reset",        "Z": 0.30},')
+        print('      {"source": "capacitor_esr_drift","target": "mcu_functional_failure", "Z": 0.35}')
+        print('    ]')
+        print('  }')
+        print()
+        print("  ✓ Causal prior built. Run 'nm validate' to set up error signals.")
         return
 
     result = call_with_mcp(
@@ -574,57 +324,78 @@ Register all endpoints first, then create validation pipelines for each."""
     print()
 
     if not VALIDATION_MCP_URL:
-        domain = detect_domain(validate_prompt)
-        vdata = DOMAIN_VALIDATE_DATA.get(domain)
-        idata = DOMAIN_INIT_DATA.get(domain)
-
-        if vdata and idata:
-            print(f"  REGISTERING VALIDATION ENDPOINTS  [{domain}]")
-            print()
-            eps = vdata['endpoints']
-            print(f"  ENDPOINTS ({len(eps)}):")
-            for i, (eid, host, measures, cadence, status) in enumerate(eps):
-                prefix = "└──" if i == len(eps) - 1 else "├──"
-                sep    = "   " if i == len(eps) - 1 else "│  "
-                print(f"  {prefix} {eid:<28} {host}")
-                print(f"  {sep} Measures: {measures}")
-                print(f"  {sep} Cadence: {cadence}  |  Status: {status}")
-                if i < len(eps) - 1:
-                    print(f"  │")
-            print()
-            edges = idata['edges']
-            print(f"  VALIDATION PIPELINES ({len(edges)}):")
-            for i, (src, tgt, z, _) in enumerate(edges):
-                prefix = "└──" if i == len(edges) - 1 else "├──"
-                sep    = "   " if i == len(edges) - 1 else "│  "
-                print(f"  {prefix} {src} → {tgt}")
-                print(f"  {sep} Error signal: ε = |predicted - actual|")
-                if i < len(edges) - 1:
-                    print(f"  │")
-            print()
-            print(f"  Feedback configured for all {len(edges)} pipelines")
-            print()
-            print(f"  ✓ Validation pipelines deployed [{domain}]. Run 'nm learn' to start.")
-        else:
-            # Default MCU example (original)
-            print("  REGISTERING VALIDATION ENDPOINTS")
-            print()
-            print("  ENDPOINTS (3):")
-            print("  ├── thermal_chamber_api         http://testlab.local:8080/thermal")
-            print("  │   Measures: junction temp, ambient temp, cycle count")
-            print("  │   Format:   JSON  |  Interval: 30s  |  Status: READY")
-            print("  │")
-            print("  ├── power_rail_monitor          http://testlab.local:8080/power")
-            print("  │   Measures: Vcc ripple (mV), ESR (mΩ), capacitor temp")
-            print("  │   Format:   JSON  |  Interval: 10s  |  Status: READY")
-            print("  │")
-            print("  └── vibration_table_daq         http://testlab.local:8080/vibration")
-            print("      Measures: acceleration (g), frequency spectrum, duration")
-            print("      Format:   JSON  |  Interval: 100ms |  Status: READY")
-            print()
-            print("  Feedback configured for all 6 pipelines")
-            print()
-            print("  ✓ Validation pipelines deployed. Run 'nm learn' to start.")
+        print("  REGISTERING VALIDATION ENDPOINTS")
+        print()
+        print("  ENDPOINTS (3):")
+        print("  ├── thermal_chamber_api         http://testlab.local:8080/thermal")
+        print("  │   Measures: junction temp, ambient temp, cycle count")
+        print("  │   Format:   JSON  |  Interval: 30s  |  Status: READY")
+        print("  │")
+        print("  ├── power_rail_monitor          http://testlab.local:8080/power")
+        print("  │   Measures: Vcc ripple (mV), ESR (mΩ), capacitor temp")
+        print("  │   Format:   JSON  |  Interval: 10s  |  Status: READY")
+        print("  │")
+        print("  └── vibration_table_daq         http://testlab.local:8080/vibration")
+        print("      Measures: acceleration (g), frequency spectrum, duration")
+        print("      Format:   JSON  |  Interval: 100ms |  Status: READY")
+        print()
+        print("  VALIDATION PIPELINES (6):")
+        print("  ├── thermal_cycling → solder_joint_fatigue")
+        print("  │   Source: thermal_chamber_api")
+        print("  │   Error signal: ε = |predicted_cycles_to_failure - actual|")
+        print("  │")
+        print("  ├── thermal_cycling → capacitor_esr_drift")
+        print("  │   Source: thermal_chamber_api + power_rail_monitor")
+        print("  │   Error signal: ε = |predicted_esr - measured_esr|")
+        print("  │")
+        print("  ├── voltage_ripple → clock_jitter")
+        print("  │   Source: power_rail_monitor")
+        print("  │   Error signal: ε = |predicted_jitter_ps - measured_jitter_ps|")
+        print("  │")
+        print("  ├── vibration_exposure → solder_joint_fatigue")
+        print("  │   Source: vibration_table_daq")
+        print("  │   Error signal: ε = |predicted_crack_growth - measured|")
+        print("  │")
+        print("  ├── solder_joint_fatigue → watchdog_reset")
+        print("  │   Source: thermal_chamber_api (reset counter)")
+        print("  │   Error signal: ε = |predicted_reset_rate - actual_rate|")
+        print("  │")
+        print("  └── capacitor_esr_drift → mcu_functional_failure")
+        print("      Source: power_rail_monitor")
+        print("      Error signal: ε = |predicted_failure_threshold - actual|")
+        print()
+        print()
+        print("  ── REVIEWABLE: Validation Functions (what connects to your sensors) ──")
+        print()
+        print("  def validate_thermal_solder(reading):")
+        print('      """thermal_cycling → solder_joint_fatigue"""')
+        print("      predicted = model.predict_cycles_to_failure(")
+        print("          junction_temp=reading['junction_temp_c'],")
+        print("          cycle_count=reading['cycle_count']")
+        print("      )")
+        print("      actual = reading['measured_crack_length_um']")
+        print("      return abs(predicted - actual)  # error signal ε")
+        print()
+        print("  def validate_ripple_jitter(reading):")
+        print('      """voltage_ripple → clock_jitter"""')
+        print("      predicted = model.predict_jitter_ps(")
+        print("          ripple_mv=reading['vcc_ripple_mv']")
+        print("      )")
+        print("      actual = reading['measured_jitter_ps']")
+        print("      return abs(predicted - actual)  # error signal ε")
+        print()
+        print("  def validate_esr_failure(reading):")
+        print('      """capacitor_esr_drift → mcu_functional_failure"""')
+        print("      predicted = model.predict_failure_probability(")
+        print("          esr_mohm=reading['esr_mohm'],")
+        print("          cap_temp_c=reading['cap_temp_c']")
+        print("      )")
+        print("      actual = reading['functional_test_pass']")
+        print("      return abs(predicted - actual)  # error signal ε")
+        print()
+        print("  Feedback configured for all 6 pipelines")
+        print()
+        print("  ✓ Validation pipelines deployed. Run 'nm learn' to start.")
         return
 
     result = call_with_mcp(
@@ -1937,13 +1708,6 @@ def cmd_help(args):
 
     print("── EXAMPLES ──────────────────────────────────────────────")
     print()
-    print("  # Start with a domain example")
-    print("  nm example space       # copies space prior.md + validate.md")
-    print("  nm example robotics    # copies robotics prior.md + validate.md")
-    print("  nm example manufacturing")
-    print("  nm example data-centers")
-    print("  nm example list        # show all available domains")
-    print()
     print("  # Full pipeline with defaults")
     print("  nm init && nm validate && nm learn --cycles 5 && nm inject")
     print()
@@ -1996,11 +1760,6 @@ def main():
     )
 
     sub = parser.add_subparsers(dest="command", metavar="<command>")
-
-    # ── Domain Examples ──────────────────────────
-    p_example = sub.add_parser("example", help="Copy domain-specific prior.md + validate.md into current directory")
-    p_example.add_argument("domain", nargs="?", default="list",
-                           help=f"Domain to load: {', '.join(AVAILABLE_DOMAINS.keys())}, or 'list'")
 
     # ── Build & Learn ──────────────────────────
     p_init = sub.add_parser("init", help="Build causal prior from prompt file")
@@ -2102,7 +1861,6 @@ def main():
         return
 
     commands = {
-        "example": cmd_example,
         "init": cmd_init,
         "validate": cmd_validate,
         "learn": cmd_learn,

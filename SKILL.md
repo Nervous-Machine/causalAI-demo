@@ -10,6 +10,42 @@ Install the CLI (zero dependencies):
 pip install .
 ```
 
+## Step 0 — Choose a Domain
+
+Before starting the pipeline, load a domain example. This sets up `prior.md` and `validate.md` with realistic causal hypotheses and validation endpoints for the user's vertical.
+
+Run:
+```bash
+nm example list
+```
+
+Then pick a domain:
+```bash
+nm example space           # thermospheric density / satellite drag
+nm example robotics        # sim-to-real calibration / 6-DOF arms
+nm example manufacturing   # CNC process quality / root cause attribution
+nm example data-centers    # per-zone thermal management / PUE optimization
+```
+
+Explain to the user:
+- This copies a domain-specific `prior.md` and `validate.md` into the working directory
+- Each domain has 5–7 causal drivers, 3+ validation endpoints, and a phased validation strategy
+- The rest of the pipeline works identically regardless of domain — `nm init`, `nm validate`, `nm learn`
+- They can inspect and edit both files before proceeding — the system starts with their domain expertise
+- If the user has their own domain, they can skip this step and write `prior.md` + `validate.md` from scratch
+
+The pipeline auto-detects which domain is loaded and renders domain-specific output in dry-run mode.
+
+**For the default demo (no specific audience):** use `nm example space` — it has the strongest case study data (16% MAPE vs 85% JB2008, >0.91 certainty on GRACE-FO).
+
+**For robotics audiences:** use `nm example robotics` — sim-to-real gap is immediately relatable.
+
+**For manufacturing audiences:** use `nm example manufacturing` — root cause attribution and per-line quality are high-value pain points.
+
+**For data center audiences:** use `nm example data-centers` — PUE optimization and overcooling waste are concrete cost problems.
+
+---
+
 ## Part 1 — Core Pipeline (MCU / Embedded)
 
 This is the main demo. No neural network, no LLM, no GPU required. Pure causal graph reasoning that compiles to a microcontroller.
@@ -22,12 +58,15 @@ nm init
 ```
 
 Explain to the user:
-- This reads `prior.md` — a domain expert's causal hypotheses about MCU reliability
-- 8 nodes represent stressors (thermal cycling, vibration), failure modes (solder fatigue, ESR drift), symptoms (watchdog resets), and outcomes (MCU failure)
-- 6 causal edges are created, each with an initial certainty score Z between 0.25–0.40
+- This reads `prior.md` — a domain expert's causal hypotheses
+- The CLI auto-detects the domain and renders the appropriate nodes and edges
+- For **space**: 8 nodes (5 drivers like solar EUV, geomagnetic activity + 3 outcomes), 7 causal edges with Z between 0.25–0.40
+- For **robotics**: 8 nodes (5 drivers like joint friction, payload mass + 3 outcomes), 7 causal edges
+- For **manufacturing**: 8 nodes (5 drivers like tool wear, material hardness + 3 outcomes), 7 causal edges
+- For **data-centers**: 8 nodes (5 drivers like IT workload, CRAC airflow + 3 outcomes), 7 causal edges
 - These are *hypotheses* — the machine doesn't trust them yet
 - Semantic edges (IS_A, PART_OF) give the model ontological context
-- Point out the **reviewable JSON graph** — this is what the customer's domain experts approve before anything runs
+- Point out the **reviewable output** — this is what the customer's domain experts approve before anything runs
 
 ### 2. Deploy Validation Pipelines
 
@@ -38,7 +77,11 @@ nm validate
 
 Explain to the user:
 - This reads `validate.md` — specifications for real-world data sources
-- 3 physical endpoints: thermal chamber, power rail monitor, vibration table
+- The CLI renders domain-specific endpoints:
+  - **space**: GRACE-FO accelerometer, TLE debris catalog, SWPC solar wind feeds
+  - **robotics**: joint encoders via RTDE, wrist force/torque sensor, environment sensors
+  - **manufacturing**: CMM inspection, CNC MTConnect feed, coolant monitor
+  - **data-centers**: rack inlet sensors, intelligent PDUs, BMS/CRAC telemetry
 - Each edge gets an error signal: ε = |prediction - observation|
 - The error signals close the learning loop — without them, Z never moves
 - Point out the **reviewable validation functions** — these show exactly how each sensor connects to each causal edge
@@ -72,7 +115,7 @@ Explain to the user:
 - Watch Z climb across cycles — some edges converge faster than others
 - The system adapts its learning rate: fast when ignorant (low Z), cautious when certain (high Z)
 - When an edge crosses Z=0.85, it's flagged as validated
-- After 5 cycles, voltage_ripple → clock_jitter and thermal_cycling → capacitor_esr_drift should cross the threshold
+- After 5 cycles, the strongest causal pathways should cross the threshold
 - The deployed MCU graph gets better with every cycle — same C code, updated certainty values
 
 ### 5. Check Status
@@ -84,9 +127,7 @@ nm status
 
 Explain to the user:
 - Shows the certainty distribution across all edges
-- Two curiosity triggers are active:
-  - vibration → solder_joint_fatigue: slowest convergence, may need more data
-  - solder_joint_fatigue → watchdog_reset: high residual error, possibly stochastic
+- Curiosity triggers are active for edges with slow convergence or high residual error
 - Curiosity drives what the system investigates next — it's not random exploration
 - Validation pipelines show real-time status
 
@@ -158,7 +199,7 @@ nm deploy --target edge_gpu
 Explain to the user:
 - This is the LLM-powered deployment — full causal reasoning plus natural language queries
 - Runs on NVIDIA Jetson, AMD Kria, RPi 5 + accelerator
-- Can answer questions like "Why is this MCU resetting?" and reason causally through the validated graph
+- Can answer domain-specific causal questions and reason through the validated graph
 
 Also mention:
 ```bash
@@ -177,17 +218,18 @@ Explain to the user:
 - Two edges crossed Z=0.85 since the last deploy — they get added automatically
 - Three deployed instances updated simultaneously: testbench, production QA, field fleet
 - No downtime, no retraining — just updated causal vectors
-- The model in the field now knows about solder joint fatigue from test lab data
+- Knowledge from one environment propagates to all deployed instances
 
 ## Key Talking Points
 
 When the demo is complete, summarize these differentiators:
 
-1. **Two prompt files, full pipeline**: `prior.md` + `validate.md` are all a customer writes
-2. **Expert-reviewable artifacts**: Every stage produces code and data that domain experts can inspect and approve — the graph JSON, validation functions, and deployed C code
-3. **Certainty, not confidence**: Z scores are earned through prediction-error cycles against real sensor data, not statistical confidence intervals
-4. **Compiles to MCU**: Causal knowledge runs on a $2 microcontroller — no cloud dependency, no neural network, no GPU
-5. **Fleet learning at 1KB**: Deployed instances share learning peer-to-peer — works in DDIL, burst radio, satellite, contested networks
-6. **Updates without retraining**: New validated edges deploy in seconds, not hours
-7. **LLM integration is optional**: The core pipeline works without any neural network — the LLM layer adds natural language reasoning on top for edge GPU / cloud targets
-8. **Customer owns the loop**: They write the prior, they connect the sensors, they approve what gets promoted and deployed
+1. **Domain examples, instant start**: `nm example space` gives you a full prior + validation spec in seconds — then customize from there
+2. **Two prompt files, full pipeline**: `prior.md` + `validate.md` are all a customer writes
+3. **Expert-reviewable artifacts**: Every stage produces code and data that domain experts can inspect and approve — the graph JSON, validation functions, and deployed C code
+4. **Certainty, not confidence**: Z scores are earned through prediction-error cycles against real sensor data, not statistical confidence intervals
+5. **Compiles to MCU**: Causal knowledge runs on a $2 microcontroller — no cloud dependency, no neural network, no GPU
+6. **Fleet learning at 1KB**: Deployed instances share learning peer-to-peer — works in DDIL, burst radio, satellite, contested networks
+7. **Updates without retraining**: New validated edges deploy in seconds, not hours
+8. **LLM integration is optional**: The core pipeline works without any neural network — the LLM layer adds natural language reasoning on top for edge GPU / cloud targets
+9. **Customer owns the loop**: They write the prior, they connect the sensors, they approve what gets promoted and deployed
