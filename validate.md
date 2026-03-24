@@ -1,64 +1,63 @@
-# Space — Validation Endpoints
+# Robotics — Validation Endpoints
 
-## Primary Density Sources
+## Trajectory & Dynamics Sensors
 
-### GRACE-FO Accelerometer-Derived Density
-- **Source**: GFZ Potsdam / NASA PO.DAAC
-- **Cadence**: Sub-minute (10-second intervals, typically aggregated to 10-min or hourly)
-- **Coverage**: Single orbital corridor (~490 km, 89° inclination)
-- **Format**: CSV with columns [timestamp, latitude, longitude, altitude_km, density_kg_m3]
-- **Quality**: Direct accelerometer measurement; no orbital inference required
-- **Use**: High-cadence ground truth for temporal lag learning and driver attribution
-- **Endpoint**: `https://podaac.jpl.nasa.gov/api/grace-fo/density`
-- **Note**: Best available cadence for causal depth; limited spatial coverage
+### Joint Encoder Feedback
+- **Source**: Robot controller (e.g., Fanuc, KUKA, UR via RTDE)
+- **Cadence**: 1 kHz (1 ms)
+- **Format**: JSON or binary stream [timestamp, joint_positions[6], joint_velocities[6], joint_torques[6]]
+- **Endpoint**: `rtde://192.168.1.100:30004` (UR example) or `ros2 topic /joint_states`
+- **Use**: Primary error signal — compare commanded vs. actual joint positions/torques
 
-### NOAA/NCEI TLE Debris Catalog
-- **Source**: Space-Track.org via NOAA/NCEI
-- **Cadence**: ~1–3 day updates per object
-- **Coverage**: Global LEO (156 voxels across altitude/latitude/longitude bins)
-- **Format**: Two-Line Element sets → ballistic coefficient → inferred density
-- **Quality**: Orbital inference introduces noise; daily cadence limits temporal resolution
-- **Use**: Spatial breadth for global voxel coverage; architecture validation
-- **Endpoint**: `https://space-track.org/basicspacedata/query/class/tle`
-- **Auth**: Space-Track account required (free for approved users)
-- **Note**: Proved the architecture (16% MAPE vs 85% JB2008) but cannot resolve lag structure
+### End-Effector Pose (External Tracking)
+- **Source**: Vision system (e.g., OptiTrack, Intel RealSense, overhead camera)
+- **Cadence**: 30–120 Hz
+- **Format**: [timestamp, x, y, z, qx, qy, qz, qw, confidence]
+- **Endpoint**: `http://192.168.1.50:8080/api/pose` or `ros2 topic /tool_pose`
+- **Use**: Ground truth for trajectory accuracy; independent of joint encoder drift
 
-## Space Weather Driver Feeds
+### Grasp Force Sensor
+- **Source**: Force/torque sensor at wrist (e.g., ATI, OnRobot)
+- **Cadence**: 100–1000 Hz
+- **Format**: [timestamp, fx, fy, fz, tx, ty, tz]
+- **Endpoint**: `http://192.168.1.60:8080/api/ft_data`
+- **Use**: Grasp force validation; detect overshoot/undershoot vs. commanded force
 
-### Solar EUV Proxy (F10.7 / S10.7)
-- **Source**: NRCan / NOAA SWPC
-- **Cadence**: Daily (F10.7); hourly available for S10.7
-- **Endpoint**: `https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json`
-- **Fields**: [date, f10.7_obs, f10.7_adj]
+## Environmental Sensors
 
-### Geomagnetic Indices (Kp, Dst)
-- **Source**: GFZ Potsdam (Kp) / Kyoto WDC (Dst)
-- **Cadence**: 3-hourly (Kp); hourly (Dst)
-- **Kp endpoint**: `https://kp.gfz-potsdam.de/app/json`
-- **Dst endpoint**: `https://wdc.kugi.kyoto-u.ac.jp/dst_realtime/`
-- **Fields**: [timestamp, kp_value] / [timestamp, dst_nT]
-
-### Solar Wind (DSCOVR at L1)
-- **Source**: NOAA SWPC / DSCOVR
+### Ambient Temperature
+- **Source**: Thermocouple or RTD near robot base
 - **Cadence**: 1-minute
-- **Endpoint**: `https://services.swpc.noaa.gov/products/solar-wind/plasma-1-day.json`
-- **Fields**: [timestamp, density_p_cm3, speed_km_s, temperature_K]
-- **Note**: ~30–60 min lead time before Earth impact
+- **Format**: [timestamp, temp_c, humidity_pct]
+- **Endpoint**: `http://192.168.1.70:8080/api/environment`
+- **Use**: Correlate thermal conditions with trajectory bias and friction drift
 
-### Hemispheric Power Index (Joule Heating Proxy)
-- **Source**: NOAA SWPC
-- **Cadence**: ~5-minute
-- **Endpoint**: `https://services.swpc.noaa.gov/json/ovation_aurora_latest.json`
-- **Fields**: [timestamp, north_power_GW, south_power_GW]
+### Conveyor Surface Condition
+- **Source**: Friction sensor or proxy (slip detection from grasp events)
+- **Cadence**: Per-cycle (each pick/place event)
+- **Format**: [timestamp, pickup_slip_detected, placement_offset_mm, belt_hours_since_maintenance]
+- **Endpoint**: `http://192.168.1.80:8080/api/conveyor_status`
+- **Use**: Surface condition tracking for placement accuracy model
 
-### Seasonal-Latitudinal Baseline
-- **Source**: Computed internally from epoch (day-of-year, solar declination)
-- **Cadence**: Daily
-- **Endpoint**: Internal computation, no external feed required
-- **Fields**: [doy, solar_declination_deg, expected_seasonal_factor]
+### Controller Diagnostics
+- **Source**: Robot controller internal telemetry
+- **Cadence**: Per-cycle or 10 Hz
+- **Format**: [timestamp, control_loop_time_us, cpu_load_pct, bus_latency_us]
+- **Endpoint**: `http://192.168.1.100:8080/api/diagnostics`
+- **Use**: Isolate controller latency jitter as an independent error source
+
+## Payload Reference
+
+### Payload Scale (Inline Weigh Station)
+- **Source**: Inline scale at pickup station
+- **Cadence**: Per-cycle
+- **Format**: [timestamp, mass_g, estimated_com_offset_mm]
+- **Endpoint**: `http://192.168.1.90:8080/api/payload`
+- **Use**: Ground truth for payload mass variation; correlate with grasp force errors
 
 ## Validation Strategy
-1. **Phase 1 — Breadth**: Validate causal graph structure across 156 voxels using TLE debris catalog. Target: confirm driver directionality and relative weight ordering.
-2. **Phase 2 — Depth**: Retrain identical pipeline on GRACE-FO corridor with sub-minute cadence. Target: resolve temporal lag structure and achieve >0.85 certainty per driver.
-3. **Phase 3 — Prediction**: Use learned lag model to forecast density perturbation evolution from driver impulses. Validate against held-out GRACE-FO windows.
-4. **Phase 4 — Fleet**: Ingest live LEO GPS drag residuals as GRACE-FO-comparable cadence source. Validate that fleet-learned causal vectors transfer across orbital corridors.
+1. **Baseline**: Record 1000 pick-and-place cycles under nominal conditions. Establish per-joint error distributions and grasp success rate.
+2. **Sim comparison**: Run identical trajectories in simulation. Compute residual (sim prediction − real observation) per joint, per cycle.
+3. **Causal learning**: Run `nm learn` cycles. Target: identify which drivers (friction, temperature, payload, surface, latency) explain the residual and at what weight.
+4. **Curiosity triggers**: Monitor for persistent residuals unexplained by the five hypothesized drivers. Flag as potential missing factors (backlash, vibration coupling, tool deflection).
+5. **Fleet propagation**: Deploy to multiple robots in the cell. Validate that causal vectors from Robot #1 improve predictions on Robot #2 in similar configuration.

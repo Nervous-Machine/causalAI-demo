@@ -1,49 +1,52 @@
-# Space — Thermospheric Density Causal Prior
+# Robotics — Sim-to-Real Calibration Causal Prior
 
 ## Domain
-Low Earth Orbit (LEO) thermospheric density modeling for satellite drag prediction.
+Industrial robotic arm (6-DOF) operating in a pick-and-place cell. Sim-to-real transfer calibration for trajectory accuracy and grasp reliability.
 
 ## Context
-Operational models (e.g., JB2008, NRLMSISE-00) predict bulk thermospheric density but lack driver-resolved attribution. They cannot tell an operator which driver caused a density spike, how long its influence persists, or how perturbations propagate across orbital shells. This prior seeds a voxel-level causal model that decomposes density into individual physical drivers.
+The robot was trained in simulation (MuJoCo/Isaac Sim) with idealized physics. Deployed performance degrades over time as real-world conditions diverge from simulation assumptions. This prior seeds a per-robot causal model that learns each unit's actual dynamics and identifies which sim assumptions are breaking.
 
 ## Causal Hypotheses
 
-### Solar EUV Flux → Thermospheric Density
-- Solar EUV heats the upper atmosphere, increasing scale height and density at satellite altitudes.
-- F10.7 index is the standard proxy; S10.7 (EUV-specific) provides better temporal resolution.
-- Influence is quasi-steady-state with ~1-day propagation lag from solar disk to thermospheric response.
-- Expected weight: dominant driver under quiet geomagnetic conditions.
+### Joint Friction Drift → Trajectory Error
+- Simulation assumes constant Coulomb + viscous friction coefficients per joint.
+- Real friction increases with wear, temperature, and lubrication degradation.
+- Joints 4–6 (wrist) degrade faster due to higher duty cycles in pick-and-place.
+- Expected signature: gradual, monotonic increase in position error at high-acceleration segments.
+- Expected weight: primary driver of trajectory error after 500+ operating hours.
 
-### Geomagnetic Activity → Thermospheric Density
-- Geomagnetic storms (Kp, Dst) drive rapid density enhancements via Joule heating and particle precipitation.
-- Response onset within 1–3 hours; recovery timescale 1–5 days depending on storm intensity.
-- Density enhancement is latitude-dependent: strongest at high latitudes, propagating equatorward.
-- Expected weight: dominant driver during storm conditions; secondary during quiet periods.
+### Payload Mass Variation → Grasp Force Error
+- Simulation trains on nominal payload mass ± 10% uniform distribution.
+- Real payloads have batch-dependent density variation, asymmetric center of mass, and surface friction differences.
+- Grasp force overshoot → product damage; grasp force undershoot → drops.
+- Expected weight: dominant driver of grasp failure events.
 
-### Solar Wind Dynamic Pressure → Thermospheric Density
-- Solar wind ram pressure modulates magnetospheric compression, indirectly affecting thermospheric energy input.
-- Influence is weaker than direct EUV or geomagnetic pathways but provides early-warning signal (upstream).
-- Lag structure: 30–90 minutes from L1 measurement to thermospheric response.
-- Expected weight: low-to-moderate; primarily a leading indicator.
+### Ambient Temperature → Joint Compliance
+- Thermal expansion affects link lengths (µm-scale) and lubricant viscosity.
+- Simulation assumes 22°C constant. Factory floor ranges 15–35°C seasonally.
+- Morning cold-start behavior differs from afternoon steady-state.
+- Expected signature: systematic bias in first-hour trajectories, correlated with ambient temperature.
+- Expected weight: moderate; significant during seasonal transitions.
 
-### Seasonal-Latitudinal Pattern → Thermospheric Density
-- Annual and semi-annual variations driven by solar declination, thermospheric composition changes, and interhemispheric transport.
-- Known semi-annual anomaly: density maxima near equinoxes, minima near solstices.
-- Latitude-dependent: different voxels experience different seasonal amplitudes.
-- Expected weight: moderate; provides baseline modulation.
+### Surface Condition → Placement Accuracy
+- Conveyor belt wear, debris accumulation, and product residue change effective friction at pickup/placement zones.
+- Simulation assumes uniform, static surface coefficients.
+- Expected signature: placement offset drift correlated with hours since last belt maintenance.
+- Expected weight: low-to-moderate; episodic rather than continuous.
 
-### Joule Heating → Thermospheric Density
-- High-latitude Joule heating from auroral electrojet currents produces localized density enhancements.
-- Proxy: Hemispheric Power Index (HPI) or auroral electrojet index (AE).
-- Propagation: equatorward via traveling atmospheric disturbances (TADs) on ~2–6 hour timescales.
-- Expected weight: significant at high latitudes; attenuated but measurable at mid-latitudes.
+### Controller Latency Jitter → Dynamic Tracking Error
+- Simulation assumes deterministic control loop timing (1 kHz).
+- Real-time OS jitter, sensor bus contention, and compute load cause ±200µs variance.
+- Effect amplified during high-speed trajectory segments.
+- Expected signature: intermittent spikes in tracking error uncorrelated with mechanical factors.
+- Expected weight: low under normal conditions; diagnostic flag for compute issues.
 
 ## Expected Interactions
-- EUV and geomagnetic activity are partially correlated (both solar-driven) but operate on different timescales.
-- Joule heating is a sub-mechanism of geomagnetic activity; the model should learn whether it adds independent explanatory power.
-- Seasonal pattern modulates the baseline that all other drivers perturb.
+- Joint friction and ambient temperature are coupled: higher temperature reduces friction short-term but accelerates lubricant degradation long-term.
+- Payload mass variation and grasp force are directly causal; surface condition modulates the effect.
+- Controller latency is independent of mechanical factors but may mask other error sources if not isolated.
 
 ## Known Gaps
-- Sub-voxel density gradients (within a single orbital shell) are not resolved at TLE cadence.
-- Nightside density response may have different lag structure than dayside.
-- Neutral wind effects on drag are not captured by density alone.
+- Backlash in gear reducers is not modeled in the simulation and may contribute unattributed error.
+- Vibration coupling between adjacent cells is not captured.
+- Tool-tip deflection under load may need a separate compliance model.
