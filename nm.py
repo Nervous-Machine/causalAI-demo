@@ -342,6 +342,146 @@ DOMAIN_VALIDATE_DATA = {
     },
 }
 
+# Default deploy target per domain
+DOMAIN_DEPLOY_TARGETS = {
+    "space":        "edge_gpu",   # Jetson Orin / spacecraft OBC
+    "robotics":     "edge_gpu",   # Jetson on robotic arm
+    "manufacturing":"edge_gpu",   # industrial edge server
+    "data-centers": "cloud",      # on-prem inference server
+}
+
+# Domain-specific dry-run data for deploy (graph JSON excerpt + capabilities)
+DOMAIN_DEPLOY_DATA = {
+    "space": {
+        "hardware": "NVIDIA Jetson Orin, spacecraft OBC with GPU",
+        "json_excerpt": [
+            '  {',
+            '    "domain": "thermospheric_density",',
+            '    "edges": [',
+            '      {',
+            '        "source": "solar_euv_flux",',
+            '        "target": "thermospheric_density",',
+            '        "certainty": 0.91,',
+            '        "mechanism": "photoionization_heating",',
+            '        "validation_cycles": 1240,',
+            '        "thresholds": { "euv_flux_warn_sfu": 120, "density_deviation_pct": 15 }',
+            '      },',
+            '      {',
+            '        "source": "thermospheric_density",',
+            '        "target": "satellite_drag",',
+            '        "certainty": 0.93,',
+            '        "mechanism": "atmospheric_drag_law",',
+            '        "validation_cycles": 892',
+            '      }',
+            '    ]',
+            '  }',
+        ],
+        "capabilities": [
+            "Predict: solar EUV spike → estimate density increase magnitude and timing",
+            "Alert:   drag deviation > 15% MAPE → conjunction risk elevated",
+            "Diagnose: 'Why did this maneuver consume 3× expected ΔV?'",
+            "Update:  new GRACE-FO passes refine estimates without retraining",
+        ],
+        "nl_query": "Why is drag higher than predicted on this orbital pass?",
+    },
+    "robotics": {
+        "hardware": "NVIDIA Jetson Orin, AMD Kria KV260",
+        "json_excerpt": [
+            '  {',
+            '    "domain": "sim_to_real_calibration",',
+            '    "edges": [',
+            '      {',
+            '        "source": "joint_friction_drift",',
+            '        "target": "trajectory_error",',
+            '        "certainty": 0.88,',
+            '        "mechanism": "kinematic_model_bias",',
+            '        "validation_cycles": 2341,',
+            '        "thresholds": { "friction_drift_warn_nm": 0.15, "trajectory_error_crit_mm": 2.5 }',
+            '      },',
+            '      {',
+            '        "source": "payload_mass_variation",',
+            '        "target": "grasp_force_error",',
+            '        "certainty": 0.91,',
+            '        "mechanism": "inertia_compensation_error",',
+            '        "validation_cycles": 1876',
+            '      }',
+            '    ]',
+            '  }',
+        ],
+        "capabilities": [
+            "Predict: joint friction increase → estimate trajectory error before it happens",
+            "Alert:   payload variance > threshold → grasp force compensation required",
+            "Diagnose: 'Why is the end-effector missing the target position?'",
+            "Update:  new encoder cycles refine friction model without retraining",
+        ],
+        "nl_query": "Why is the end-effector missing the target position?",
+    },
+    "manufacturing": {
+        "hardware": "NVIDIA Jetson AGX, industrial edge server",
+        "json_excerpt": [
+            '  {',
+            '    "domain": "cnc_process_quality",',
+            '    "edges": [',
+            '      {',
+            '        "source": "tool_wear",',
+            '        "target": "dimensional_deviation",',
+            '        "certainty": 0.89,',
+            '        "mechanism": "cutting_edge_degradation",',
+            '        "validation_cycles": 3102,',
+            '        "thresholds": { "wear_warn_mm": 0.08, "deviation_crit_mm": 0.05 }',
+            '      },',
+            '      {',
+            '        "source": "coolant_concentration",',
+            '        "target": "surface_roughness",',
+            '        "certainty": 0.87,',
+            '        "mechanism": "lubrication_effectiveness",',
+            '        "validation_cycles": 1540',
+            '      }',
+            '    ]',
+            '  }',
+        ],
+        "capabilities": [
+            "Predict: tool wear rate → estimate remaining useful life and scrap risk",
+            "Alert:   dimensional deviation approaching tolerance limit → intervention",
+            "Diagnose: 'Why did this batch have elevated surface roughness?'",
+            "Update:  new CMM inspection results refine tolerance model without retraining",
+        ],
+        "nl_query": "Why did this batch have elevated surface roughness?",
+    },
+    "data-centers": {
+        "hardware": "On-premises inference server, existing data center compute",
+        "json_excerpt": [
+            '  {',
+            '    "domain": "thermal_management",',
+            '    "edges": [',
+            '      {',
+            '        "source": "it_workload",',
+            '        "target": "zone_temperature",',
+            '        "certainty": 0.92,',
+            '        "mechanism": "heat_dissipation",',
+            '        "validation_cycles": 4821,',
+            '        "thresholds": { "workload_warn_kw": 45, "temp_crit_c": 35 }',
+            '      },',
+            '      {',
+            '        "source": "zone_temperature",',
+            '        "target": "cooling_power",',
+            '        "certainty": 0.90,',
+            '        "mechanism": "crac_control_response",',
+            '        "validation_cycles": 3910',
+            '      }',
+            '    ]',
+            '  }',
+        ],
+        "capabilities": [
+            "Predict: workload spike → estimate zone temperature rise before alarms trigger",
+            "Optimize: adjust CRAC setpoints proactively to minimize PUE",
+            "Diagnose: 'Why is zone 3 running 4°C above setpoint?'",
+            "Update:  new rack telemetry refines thermal model without retraining",
+        ],
+        "nl_query": "Why is zone 3 running 4°C above setpoint?",
+    },
+}
+
 
 def detect_domain(prior_text=None):
     """Detect domain from prior.md content. Returns domain key or 'default'."""
@@ -403,6 +543,9 @@ def cmd_example(args):
         if src.exists():
             dst = Path(dst_name)
             if dst.exists():
+                if dst.read_text() == src.read_text():
+                    print(f"  ✓ {dst_name} already up to date")
+                    continue
                 print(f"  ⚠ {dst_name} already exists. Overwrite? [y/N] ", end="", flush=True)
                 try:
                     answer = input().strip().lower()
@@ -418,15 +561,42 @@ def cmd_example(args):
         else:
             print(f"  ⚠ {src} not found, skipping")
 
-    if copied:
-        print()
-        print(f"  Domain: {AVAILABLE_DOMAINS[domain]}")
-        print()
-        print(f"  Next steps:")
-        print(f"    nm init          # build causal graph from {domain} prior")
-        print(f"    nm validate      # connect {domain} validation endpoints")
-        print(f"    nm review        # interactive review of prior + validation")
-        print(f"    nm learn --cycles 5")
+    print()
+    print(f"  Domain: {AVAILABLE_DOMAINS[domain]}")
+    print()
+
+    # Run the full demo pipeline for this domain
+    import types
+
+    init_args = types.SimpleNamespace(prior="prior.md")
+    cmd_init(init_args)
+
+    print()
+    validate_args = types.SimpleNamespace(spec="validate.md")
+    cmd_validate(validate_args)
+
+    print()
+    deploy_target = DOMAIN_DEPLOY_TARGETS.get(domain, "microcontroller")
+    deploy_args = types.SimpleNamespace(target=deploy_target, base="microsoft/phi-3.5-mini-instruct")
+    cmd_deploy(deploy_args)
+
+    print()
+    learn_args = types.SimpleNamespace(cycles=5)
+    cmd_learn(learn_args)
+
+    print()
+    status_args = types.SimpleNamespace()
+    cmd_status(status_args)
+
+    print()
+    fleet_args = types.SimpleNamespace(mode="status")
+    cmd_fleet(fleet_args)
+    print()
+    fleet_args.mode = "push"
+    cmd_fleet(fleet_args)
+    print()
+    fleet_args.mode = "pull"
+    cmd_fleet(fleet_args)
 
 
 # ─────────────────────────────────────────────
@@ -1109,6 +1279,9 @@ Report: artifact size, deployment instructions, what's included."""
     print()
 
     if not DOMAIN_HEADS_MCP_URL:
+        domain = detect_domain()
+        ddata = DOMAIN_DEPLOY_DATA.get(domain)
+
         if target == "microcontroller":
             print("  ARTIFACT:")
             print("  ├── causal_graph.json        48KB   (validated causal edges + metadata)")
@@ -1120,34 +1293,31 @@ Report: artifact size, deployment instructions, what's included."""
             print()
             print("  ── REVIEWABLE: causal_graph.json (excerpt) ──")
             print()
-            print('  {')
-            print('    "domain": "mcu_reliability",')
-            print('    "edges": [')
-            print('      {')
-            print('        "source": "voltage_ripple",')
-            print('        "target": "clock_jitter",')
-            print('        "certainty": 0.89,')
-            print('        "mechanism": "power_rail_coupling",')
-            print('        "validation_cycles": 847,')
-            print('        "thresholds": {')
-            print('          "ripple_mv": 50,')
-            print('          "jitter_warn_ps": 200,')
-            print('          "jitter_crit_ps": 500')
-            print('        }')
-            print('      },')
-            print('      {')
-            print('        "source": "thermal_cycling",')
-            print('        "target": "capacitor_esr_drift",')
-            print('        "certainty": 0.86,')
-            print('        "mechanism": "dielectric_degradation",')
-            print('        "validation_cycles": 612,')
-            print('        "thresholds": {')
-            print('          "cycles_warn": 5000,')
-            print('          "esr_limit_mohm": 150')
-            print('        }')
-            print('      }')
-            print('    ]')
-            print('  }')
+            if ddata:
+                for line in ddata["json_excerpt"]:
+                    print(line)
+            else:
+                print('  {')
+                print('    "domain": "mcu_reliability",')
+                print('    "edges": [')
+                print('      {')
+                print('        "source": "voltage_ripple",')
+                print('        "target": "clock_jitter",')
+                print('        "certainty": 0.89,')
+                print('        "mechanism": "power_rail_coupling",')
+                print('        "validation_cycles": 847,')
+                print('        "thresholds": { "ripple_mv": 50, "jitter_warn_ps": 200, "jitter_crit_ps": 500 }')
+                print('      },')
+                print('      {')
+                print('        "source": "thermal_cycling",')
+                print('        "target": "capacitor_esr_drift",')
+                print('        "certainty": 0.86,')
+                print('        "mechanism": "dielectric_degradation",')
+                print('        "validation_cycles": 612,')
+                print('        "thresholds": { "cycles_warn": 5000, "esr_limit_mohm": 150 }')
+                print('      }')
+                print('    ]')
+                print('  }')
             print()
             print("  ── REVIEWABLE: inference_engine.c (excerpt) ──")
             print()
@@ -1176,28 +1346,60 @@ Report: artifact size, deployment instructions, what's included."""
             print("      return result;")
             print("  }")
             print()
-            print("  The MCU can:")
-            print("    • Diagnose: voltage_ripple detected → predict clock_jitter risk")
-            print("    • Predict:  thermal cycles accumulated → estimate capacitor ESR")
-            print("    • Alert:    ESR drift approaching failure threshold → watchdog")
-            print("    • Learn:    continue updating from onboard sensor data")
+            caps = ddata["capabilities"] if ddata else [
+                "Diagnose: voltage_ripple detected → predict clock_jitter risk",
+                "Predict:  thermal cycles accumulated → estimate capacitor ESR",
+                "Alert:    ESR drift approaching failure threshold → watchdog",
+                "Learn:    continue updating from onboard sensor data",
+            ]
+            print("  The model can:")
+            for cap in caps:
+                print(f"    • {cap}")
         elif target == "edge_gpu":
             print("  ARTIFACT:")
             print(f"  ├── base_model_q4.gguf          ~2GB  ({model_short} quantized)")
             print("  ├── causal_graph.json             48KB")
             print("  └── config.json                    4KB")
             print()
-            print("  Runs on: NVIDIA Jetson, AMD Kria, RPi 5 + accelerator")
+            hw = ddata["hardware"] if ddata else "NVIDIA Jetson, AMD Kria, RPi 5 + accelerator"
+            print(f"  Runs on: {hw}")
             print()
-            print("  Full LLM + causal reasoning. Can accept natural language")
-            print("  queries ('Why is this MCU resetting?') and reason causally.")
+            print("  ── REVIEWABLE: causal_graph.json (excerpt) ──")
+            print()
+            if ddata:
+                for line in ddata["json_excerpt"]:
+                    print(line)
+            print()
+            nl_query = ddata["nl_query"] if ddata else "Why is this system behaving unexpectedly?"
+            print(f"  Full LLM + causal reasoning. Example query:")
+            print(f"    \"{nl_query}\"")
+            print()
+            if ddata:
+                print("  The model can:")
+                for cap in ddata["capabilities"]:
+                    print(f"    • {cap}")
         elif target == "cloud":
             print("  ARTIFACT:")
             print(f"  ├── base_model.safetensors       ~8GB  ({model_short})")
             print("  ├── causal_graph.json               48KB")
             print("  └── config.json                      4KB")
             print()
-            print("  Deploy to: any inference server for fleet-wide monitoring.")
+            hw = ddata["hardware"] if ddata else "any inference server for fleet-wide monitoring"
+            print(f"  Deploy to: {hw}")
+            print()
+            if ddata:
+                print("  ── REVIEWABLE: causal_graph.json (excerpt) ──")
+                print()
+                for line in ddata["json_excerpt"]:
+                    print(line)
+                print()
+                nl_query = ddata["nl_query"]
+                print(f"  Full LLM + causal reasoning. Example query:")
+                print(f"    \"{nl_query}\"")
+                print()
+                print("  The model can:")
+                for cap in ddata["capabilities"]:
+                    print(f"    • {cap}")
         print()
         print("  Next: nm update  (push new learning without retraining)")
         return
