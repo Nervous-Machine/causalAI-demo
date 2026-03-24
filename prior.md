@@ -1,49 +1,52 @@
-# Space — Thermospheric Density Causal Prior
+# Data Centers — Thermal Management Causal Prior
 
 ## Domain
-Low Earth Orbit (LEO) thermospheric density modeling for satellite drag prediction.
+Data center hot aisle / cold aisle cooling optimization. Per-zone thermal modeling for PUE reduction and hot spot prevention.
 
 ## Context
-Operational models (e.g., JB2008, NRLMSISE-00) predict bulk thermospheric density but lack driver-resolved attribution. They cannot tell an operator which driver caused a density spike, how long its influence persists, or how perturbations propagate across orbital shells. This prior seeds a voxel-level causal model that decomposes density into individual physical drivers.
+CFD models predict airflow and temperature distribution for the designed rack layout. In practice, workload shifts, rack reconfigurations, missing blanking panels, and seasonal ambient changes cause thermal behavior to diverge from the simulation zone by zone. Operators compensate by overcooling. This prior seeds a per-zone causal model that learns actual thermal dynamics and attributes temperature deviations to specific drivers.
 
 ## Causal Hypotheses
 
-### Solar EUV Flux → Thermospheric Density
-- Solar EUV heats the upper atmosphere, increasing scale height and density at satellite altitudes.
-- F10.7 index is the standard proxy; S10.7 (EUV-specific) provides better temporal resolution.
-- Influence is quasi-steady-state with ~1-day propagation lag from solar disk to thermospheric response.
-- Expected weight: dominant driver under quiet geomagnetic conditions.
+### IT Workload → Heat Dissipation
+- Server power draw scales with compute utilization. GPU-heavy workloads produce 2–5x the heat of idle racks.
+- Workload migration (VM live migration, batch scheduling) causes rapid thermal transients.
+- Expected signature: rack inlet temperature tracks workload with 2–10 minute thermal lag depending on airflow velocity.
+- Expected weight: dominant driver of zone-level temperature variation.
 
-### Geomagnetic Activity → Thermospheric Density
-- Geomagnetic storms (Kp, Dst) drive rapid density enhancements via Joule heating and particle precipitation.
-- Response onset within 1–3 hours; recovery timescale 1–5 days depending on storm intensity.
-- Density enhancement is latitude-dependent: strongest at high latitudes, propagating equatorward.
-- Expected weight: dominant driver during storm conditions; secondary during quiet periods.
+### CRAC/CRAH Airflow → Cold Aisle Temperature
+- Computer Room Air Conditioning/Handling units supply cold air to the raised floor plenum.
+- Fan speed, supply air temperature setpoint, and damper positions determine delivery to each zone.
+- CFD models assume designed plenum pressure; real pressure varies with tile placement, cable obstructions, and neighboring zones.
+- Expected signature: cold aisle temperature responds to CRAC setpoint changes with zone-specific lag and magnitude.
+- Expected weight: primary controllable driver; the lever for optimization.
 
-### Solar Wind Dynamic Pressure → Thermospheric Density
-- Solar wind ram pressure modulates magnetospheric compression, indirectly affecting thermospheric energy input.
-- Influence is weaker than direct EUV or geomagnetic pathways but provides early-warning signal (upstream).
-- Lag structure: 30–90 minutes from L1 measurement to thermospheric response.
-- Expected weight: low-to-moderate; primarily a leading indicator.
+### Ambient / Outside Air Temperature → Economizer Effectiveness
+- Free cooling (economizer mode) effectiveness depends on outside air temperature and humidity.
+- Seasonal transitions and diurnal cycles shift the balance between mechanical and free cooling.
+- Expected signature: PUE increases when ambient temperature exceeds economizer threshold; zone temperatures drift unevenly.
+- Expected weight: moderate; seasonal and diurnal modulation of cooling capacity.
 
-### Seasonal-Latitudinal Pattern → Thermospheric Density
-- Annual and semi-annual variations driven by solar declination, thermospheric composition changes, and interhemispheric transport.
-- Known semi-annual anomaly: density maxima near equinoxes, minima near solstices.
-- Latitude-dependent: different voxels experience different seasonal amplitudes.
-- Expected weight: moderate; provides baseline modulation.
+### Rack Configuration → Recirculation
+- Missing blanking panels, open cable cutouts, and non-standard rack depths create hot air recirculation paths.
+- Hot exhaust air bypasses the hot aisle containment and re-enters the cold aisle.
+- Expected signature: persistent hot spots at specific rack positions uncorrelated with workload; exacerbated under high total load.
+- Expected weight: low-to-moderate as a continuous factor; high as a root cause for specific chronic hot spots.
 
-### Joule Heating → Thermospheric Density
-- High-latitude Joule heating from auroral electrojet currents produces localized density enhancements.
-- Proxy: Hemispheric Power Index (HPI) or auroral electrojet index (AE).
-- Propagation: equatorward via traveling atmospheric disturbances (TADs) on ~2–6 hour timescales.
-- Expected weight: significant at high latitudes; attenuated but measurable at mid-latitudes.
+### Raised Floor Tile Configuration → Airflow Distribution
+- Perforated tile placement and open percentage determine per-zone airflow delivery.
+- Tiles near CRAC units receive disproportionate flow; far zones are starved.
+- Cable bundles under the floor create pressure shadows.
+- Expected signature: systematic temperature gradient from CRAC-proximal to CRAC-distal zones.
+- Expected weight: moderate; primarily spatial bias rather than temporal variation.
 
 ## Expected Interactions
-- EUV and geomagnetic activity are partially correlated (both solar-driven) but operate on different timescales.
-- Joule heating is a sub-mechanism of geomagnetic activity; the model should learn whether it adds independent explanatory power.
-- Seasonal pattern modulates the baseline that all other drivers perturb.
+- Workload and CRAC airflow are the primary dynamic pair: workload creates heat, CRAC responds.
+- Ambient temperature modulates CRAC effectiveness, creating a three-way interaction.
+- Rack configuration and tile layout are quasi-static but create the spatial bias that dynamic factors modulate.
+- Recirculation effects worsen non-linearly under high workload — a hot spot that's manageable at 50% load may be critical at 90%.
 
 ## Known Gaps
-- Sub-voxel density gradients (within a single orbital shell) are not resolved at TLE cadence.
-- Nightside density response may have different lag structure than dayside.
-- Neutral wind effects on drag are not captured by density alone.
+- Server-level fan speed variation (different servers respond differently to thermal stress).
+- Humidity effects on cooling efficiency are not modeled.
+- Adjacent zone coupling (one zone's exhaust affecting another's intake) may need explicit modeling.
