@@ -482,6 +482,483 @@ DOMAIN_DEPLOY_DATA = {
     },
 }
 
+# ─────────────────────────────────────────────
+# Domain data for learn / status / inject /
+# train / update / fleet dry-run output
+# ─────────────────────────────────────────────
+
+# (edge_label, z_init, validation_source)
+DOMAIN_LEARN_DATA = {
+    "space": [
+        ("solar_euv_flux → thermospheric_density",        0.40, "grace_fo_accelerometer"),
+        ("geomagnetic_activity → thermospheric_density",  0.35, "swpc_solar_wind"),
+        ("solar_wind_pressure → thermospheric_density",   0.25, "swpc_solar_wind"),
+        ("seasonal_latitudinal → thermospheric_density",  0.35, "grace_fo_accelerometer"),
+        ("joule_heating → thermospheric_density",         0.30, "grace_fo_accelerometer"),
+        ("thermospheric_density → satellite_drag",        0.40, "tle_debris_catalog"),
+        ("satellite_drag → collision_avoidance_event",    0.30, "tle_debris_catalog"),
+    ],
+    "robotics": [
+        ("joint_friction_drift → trajectory_error",    0.35, "joint_encoder_rtde"),
+        ("payload_mass_variation → grasp_force_error", 0.40, "ft_sensor_wrist"),
+        ("ambient_temperature → joint_friction_drift", 0.25, "environment_sensor"),
+        ("surface_condition → grasp_force_error",      0.25, "ft_sensor_wrist"),
+        ("controller_latency → trajectory_error",      0.30, "joint_encoder_rtde"),
+        ("trajectory_error → cycle_failure",           0.35, "joint_encoder_rtde"),
+        ("grasp_force_error → cycle_failure",          0.35, "ft_sensor_wrist"),
+    ],
+    "manufacturing": [
+        ("tool_wear → dimensional_deviation",              0.40, "cmm_inspection"),
+        ("ambient_temperature → dimensional_deviation",    0.30, "cnc_mtconnect"),
+        ("material_batch_hardness → dimensional_deviation",0.30, "cmm_inspection"),
+        ("coolant_concentration → surface_roughness",      0.25, "coolant_monitor"),
+        ("coolant_concentration → tool_wear",              0.25, "coolant_monitor"),
+        ("fixture_clamping_force → dimensional_deviation", 0.20, "cnc_mtconnect"),
+        ("dimensional_deviation → scrap_event",            0.35, "cmm_inspection"),
+    ],
+    "data-centers": [
+        ("it_workload → zone_temperature",         0.40, "rack_inlet_sensors"),
+        ("crac_airflow → zone_temperature",        0.40, "bms_crac_telemetry"),
+        ("ambient_temperature → zone_temperature", 0.30, "rack_inlet_sensors"),
+        ("rack_configuration → zone_temperature",  0.25, "rack_inlet_sensors"),
+        ("floor_tile_layout → zone_temperature",   0.25, "rack_inlet_sensors"),
+        ("zone_temperature → cooling_power",       0.35, "bms_crac_telemetry"),
+        ("zone_temperature → thermal_alarm",       0.30, "rack_inlet_sensors"),
+    ],
+}
+
+def _make_cycle_data(edges, num_cycles):
+    """Compute progressive learning cycle data from (label, z_init, source) tuples."""
+    MULTIPLIERS = [0.28, 0.32, 0.28, 0.22, 0.16]
+    z = {label: z0 for label, z0, _ in edges}
+    result = []
+    for i in range(num_cycles):
+        m = MULTIPLIERS[min(i, len(MULTIPLIERS) - 1)]
+        cycle = []
+        for label, z0, source in edges:
+            z_b = round(z[label], 2)
+            gap = 1.0 - z_b
+            eps = round(gap * 0.16 + 0.008, 3)
+            eta = round(0.28 * gap + 0.04, 3)
+            z_a = round(min(0.97, z_b + m * gap), 2)
+            z[label] = z_a
+            cycle.append((label, z_b, z_a, eps, eta, source))
+        result.append(cycle)
+    return result
+
+
+# Edge states after 5 learning cycles
+DOMAIN_STATUS_DATA = {
+    "space": {
+        "edges": [
+            ("thermospheric_density → satellite_drag",        0.91, "READY"),
+            ("solar_euv_flux → thermospheric_density",        0.89, "READY"),
+            ("geomagnetic_activity → thermospheric_density",  0.86, "READY"),
+            ("seasonal_latitudinal → thermospheric_density",  0.83, "learning"),
+            ("joule_heating → thermospheric_density",         0.81, "learning"),
+            ("satellite_drag → collision_avoidance_event",    0.79, "learning"),
+            ("solar_wind_pressure → thermospheric_density",   0.74, "learning"),
+        ],
+        "curiosity": [
+            ("solar_wind_pressure → thermospheric_density", 0.74,
+             "Sparse Bz correlation data. Consider: DSCOVR L1 real-time feed, additional storm events."),
+            ("satellite_drag → collision_avoidance_event", 0.79,
+             "Stochastic threshold event. High residual despite rising Z — conjunction rarity limits cycle rate."),
+        ],
+        "endpoints": [
+            ("grace_fo_accelerometer", "active", "8s ago"),
+            ("tle_debris_catalog",     "active", "4m ago"),
+            ("swpc_solar_wind",        "active", "2s ago"),
+        ],
+    },
+    "robotics": {
+        "edges": [
+            ("payload_mass_variation → grasp_force_error", 0.91, "READY"),
+            ("joint_friction_drift → trajectory_error",    0.88, "READY"),
+            ("trajectory_error → cycle_failure",           0.86, "READY"),
+            ("grasp_force_error → cycle_failure",          0.84, "learning"),
+            ("controller_latency → trajectory_error",      0.79, "learning"),
+            ("ambient_temperature → joint_friction_drift", 0.74, "learning"),
+            ("surface_condition → grasp_force_error",      0.72, "learning"),
+        ],
+        "curiosity": [
+            ("surface_condition → grasp_force_error", 0.72,
+             "Inconsistent surface coeff readings across materials. Consider: structured surface test matrix."),
+            ("ambient_temperature → joint_friction_drift", 0.74,
+             "Seasonal variation obscures signal. Consider: climate-controlled baseline runs."),
+        ],
+        "endpoints": [
+            ("joint_encoder_rtde", "active",  "1ms"),
+            ("ft_sensor_wrist",    "active",  "10ms"),
+            ("environment_sensor", "active",  "18s ago"),
+        ],
+    },
+    "manufacturing": {
+        "edges": [
+            ("tool_wear → dimensional_deviation",              0.91, "READY"),
+            ("dimensional_deviation → scrap_event",            0.88, "READY"),
+            ("coolant_concentration → tool_wear",              0.86, "READY"),
+            ("material_batch_hardness → dimensional_deviation",0.82, "learning"),
+            ("ambient_temperature → dimensional_deviation",    0.79, "learning"),
+            ("coolant_concentration → surface_roughness",      0.74, "learning"),
+            ("fixture_clamping_force → dimensional_deviation", 0.68, "learning"),
+        ],
+        "curiosity": [
+            ("fixture_clamping_force → dimensional_deviation", 0.68,
+             "Slowest convergence — started at Z=0.20. Consider: instrumented fixture with direct load cells."),
+            ("coolant_concentration → surface_roughness", 0.74,
+             "Non-linear relationship at concentration extremes. Consider: extended concentration sweep."),
+        ],
+        "endpoints": [
+            ("cmm_inspection",  "active",  "per-part"),
+            ("cnc_mtconnect",   "active",  "100Hz"),
+            ("coolant_monitor", "active",  "2m ago"),
+        ],
+    },
+    "data-centers": {
+        "edges": [
+            ("it_workload → zone_temperature",         0.92, "READY"),
+            ("crac_airflow → zone_temperature",        0.91, "READY"),
+            ("zone_temperature → cooling_power",       0.88, "READY"),
+            ("ambient_temperature → zone_temperature", 0.83, "learning"),
+            ("floor_tile_layout → zone_temperature",   0.79, "learning"),
+            ("rack_configuration → zone_temperature",  0.77, "learning"),
+            ("zone_temperature → thermal_alarm",       0.74, "learning"),
+        ],
+        "curiosity": [
+            ("zone_temperature → thermal_alarm", 0.74,
+             "Stochastic threshold trigger. High residual — alarm events are rare by design."),
+            ("rack_configuration → zone_temperature", 0.77,
+             "Complex recirculation patterns. Consider: CFD-calibrated airflow sensors per rack row."),
+        ],
+        "endpoints": [
+            ("rack_inlet_sensors",  "active", "1m ago"),
+            ("intelligent_pdus",    "active", "1m ago"),
+            ("bms_crac_telemetry",  "active", "32s ago"),
+        ],
+    },
+}
+
+# Approved (Z ≥ 0.85) and held-back edges for inject
+DOMAIN_INJECT_DATA = {
+    "space": {
+        "approved": [
+            ("thermospheric_density → satellite_drag",       0.91, "892 cycles, TLE + GRACE-FO cross-validated"),
+            ("solar_euv_flux → thermospheric_density",       0.89, "1240 cycles, GRACE-FO + SWPC cross-validated"),
+            ("geomagnetic_activity → thermospheric_density", 0.86, "1015 cycles, SWPC solar wind validated"),
+        ],
+        "held": [
+            ("seasonal_latitudinal → thermospheric_density",  0.83, "↑ close"),
+            ("joule_heating → thermospheric_density",         0.81, "↑ learning"),
+            ("satellite_drag → collision_avoidance_event",    0.79, "↑ learning"),
+            ("solar_wind_pressure → thermospheric_density",   0.74, "↑ learning"),
+        ],
+    },
+    "robotics": {
+        "approved": [
+            ("payload_mass_variation → grasp_force_error", 0.91, "1876 cycles, F/T sensor + CMM cross-validated"),
+            ("joint_friction_drift → trajectory_error",    0.88, "2341 cycles, encoder + force/torque validated"),
+            ("trajectory_error → cycle_failure",           0.86, "2089 cycles, cycle log correlated"),
+        ],
+        "held": [
+            ("grasp_force_error → cycle_failure",          0.84, "↑ close"),
+            ("controller_latency → trajectory_error",      0.79, "↑ learning"),
+            ("ambient_temperature → joint_friction_drift", 0.74, "↑ learning"),
+            ("surface_condition → grasp_force_error",      0.72, "↑ learning"),
+        ],
+    },
+    "manufacturing": {
+        "approved": [
+            ("tool_wear → dimensional_deviation",   0.91, "3102 cycles, CMM + MTConnect cross-validated"),
+            ("dimensional_deviation → scrap_event", 0.88, "2847 cycles, CMM inspection correlated"),
+            ("coolant_concentration → tool_wear",   0.86, "1540 cycles, coolant monitor + CMM validated"),
+        ],
+        "held": [
+            ("material_batch_hardness → dimensional_deviation", 0.82, "↑ close"),
+            ("ambient_temperature → dimensional_deviation",     0.79, "↑ learning"),
+            ("coolant_concentration → surface_roughness",       0.74, "↑ learning"),
+            ("fixture_clamping_force → dimensional_deviation",  0.68, "↑ learning"),
+        ],
+    },
+    "data-centers": {
+        "approved": [
+            ("it_workload → zone_temperature",   0.92, "4821 cycles, rack sensors + PDU cross-validated"),
+            ("crac_airflow → zone_temperature",  0.91, "4102 cycles, BMS/CRAC telemetry validated"),
+            ("zone_temperature → cooling_power", 0.88, "3910 cycles, PDU + CRAC response correlated"),
+        ],
+        "held": [
+            ("ambient_temperature → zone_temperature", 0.83, "↑ close"),
+            ("floor_tile_layout → zone_temperature",   0.79, "↑ learning"),
+            ("rack_configuration → zone_temperature",  0.77, "↑ learning"),
+            ("zone_temperature → thermal_alarm",       0.74, "↑ learning"),
+        ],
+    },
+}
+
+# Training metrics after injection
+DOMAIN_TRAIN_DATA = {
+    "space": {
+        "accuracy":    ("94.2%", "41.8%", "density regime classification"),
+        "auroc":       ("0.96",  "thermospheric_density → satellite_drag"),
+        "calibration": "0.93",
+        "retention":   "96.1%",
+        "capability":  "thermospheric drag prediction and conjunction risk",
+    },
+    "robotics": {
+        "accuracy":    ("91.7%", "44.3%", "sim-to-real error classification"),
+        "auroc":       ("0.94",  "trajectory_error → cycle_failure"),
+        "calibration": "0.91",
+        "retention":   "95.8%",
+        "capability":  "sim-to-real gap diagnosis and trajectory error prediction",
+    },
+    "manufacturing": {
+        "accuracy":    ("93.1%", "42.6%", "process deviation classification"),
+        "auroc":       ("0.95",  "tool_wear → dimensional_deviation"),
+        "calibration": "0.92",
+        "retention":   "95.4%",
+        "capability":  "process quality prediction and root cause attribution",
+    },
+    "data-centers": {
+        "accuracy":    ("95.3%", "43.9%", "thermal zone classification"),
+        "auroc":       ("0.97",  "it_workload → zone_temperature"),
+        "calibration": "0.94",
+        "retention":   "96.8%",
+        "capability":  "zone temperature prediction and cooling optimization",
+    },
+}
+
+# Vectors that improved since last deploy + new edges that crossed Z=0.85
+DOMAIN_UPDATE_DATA = {
+    "space": {
+        "increases": [
+            ("thermospheric_density → satellite_drag",       0.91, 0.95, 0.04),
+            ("solar_euv_flux → thermospheric_density",       0.89, 0.93, 0.04),
+            ("geomagnetic_activity → thermospheric_density", 0.86, 0.91, 0.05),
+        ],
+        "new_high": [
+            ("seasonal_latitudinal → thermospheric_density", 0.83, 0.87, "GRACE-FO seasonal correlation study"),
+            ("joule_heating → thermospheric_density",        0.81, 0.86, "SWPC geomagnetic storm dataset"),
+        ],
+        "deployed": [
+            ("sat_alpha",         "5 vectors updated  ✓"),
+            ("sat_bravo",         "5 vectors updated  ✓"),
+            ("ground_station_01", "5 vectors updated  ✓"),
+        ],
+        "context": "Satellite orbit prediction models updated. New GRACE-FO passes refined density estimates.",
+    },
+    "robotics": {
+        "increases": [
+            ("payload_mass_variation → grasp_force_error", 0.91, 0.95, 0.04),
+            ("joint_friction_drift → trajectory_error",    0.88, 0.93, 0.05),
+            ("trajectory_error → cycle_failure",           0.86, 0.90, 0.04),
+        ],
+        "new_high": [
+            ("grasp_force_error → cycle_failure",          0.84, 0.88, "cycle log + F/T sensor correlation"),
+            ("controller_latency → trajectory_error",      0.79, 0.86, "encoder timing study — 12,000 cycles"),
+        ],
+        "deployed": [
+            ("arm_facility_a_01", "5 vectors updated  ✓"),
+            ("arm_facility_a_02", "5 vectors updated  ✓"),
+            ("arm_testbench_01",  "5 vectors updated  ✓"),
+        ],
+        "context": "Sim-to-real calibration models updated. Controller latency now validated — sim gap narrowed.",
+    },
+    "manufacturing": {
+        "increases": [
+            ("tool_wear → dimensional_deviation",   0.91, 0.95, 0.04),
+            ("dimensional_deviation → scrap_event", 0.88, 0.92, 0.04),
+            ("coolant_concentration → tool_wear",   0.86, 0.91, 0.05),
+        ],
+        "new_high": [
+            ("material_batch_hardness → dimensional_deviation", 0.82, 0.87, "expanded material batch dataset"),
+            ("ambient_temperature → dimensional_deviation",     0.79, 0.86, "thermal growth study — 90-day run"),
+        ],
+        "deployed": [
+            ("cnc_line_01", "5 vectors updated  ✓"),
+            ("cnc_line_02", "5 vectors updated  ✓"),
+            ("qa_server",   "5 vectors updated  ✓"),
+        ],
+        "context": "CNC process models updated. Ambient thermal growth now validated — tolerance limits tightened.",
+    },
+    "data-centers": {
+        "increases": [
+            ("it_workload → zone_temperature",   0.92, 0.96, 0.04),
+            ("crac_airflow → zone_temperature",  0.91, 0.94, 0.03),
+            ("zone_temperature → cooling_power", 0.88, 0.92, 0.04),
+        ],
+        "new_high": [
+            ("ambient_temperature → zone_temperature", 0.83, 0.87, "economizer season correlation — 6-month run"),
+            ("floor_tile_layout → zone_temperature",   0.79, 0.86, "airflow study with tile reconfiguration"),
+        ],
+        "deployed": [
+            ("dc_zone_monitor",      "5 vectors updated  ✓"),
+            ("dc_crac_controller",   "5 vectors updated  ✓"),
+            ("dc_cooling_optimizer", "5 vectors updated  ✓"),
+        ],
+        "context": "Thermal management models updated. Economizer-season ambient coupling now validated.",
+    },
+}
+
+# Fleet topology and vector sync data per domain
+DOMAIN_FLEET_DATA = {
+    "space": {
+        "topology": [
+            ("sat_alpha",         "online",  "94s ago",  "7", ""),
+            ("sat_bravo",         "online",  "6m ago",   "7", ""),
+            ("sat_charlie",       "offline", "4h ago",   "5", "eclipse — 3 updates queued (2.4 KB)"),
+            ("ground_station_01", "online",  "12s ago",  "7", ""),
+            ("ground_station_02", "online",  "45s ago",  "7", ""),
+        ],
+        "push_vectors": [
+            ("thermospheric_density → satellite_drag",       0.91, "tle_debris_catalog"),
+            ("solar_euv_flux → thermospheric_density",       0.89, "grace_fo + swpc"),
+            ("geomagnetic_activity → thermospheric_density", 0.86, "swpc_solar_wind"),
+        ],
+        "push_nodes": [
+            ("sat_alpha",         "received  ✓", "Ku-band, 1.1s"),
+            ("sat_bravo",         "received  ✓", "Ku-band, 1.3s"),
+            ("sat_charlie",       "queued   ⟳",  "DDIL — eclipse, will sync on next pass"),
+            ("ground_station_01", "received  ✓", "fiber, 8ms"),
+            ("ground_station_02", "received  ✓", "fiber, 11ms"),
+        ],
+        "pull_from": [
+            ("sat_alpha", "orbit: 550km LEO, solar-max conditions", [
+                ("solar_euv_flux → thermospheric_density",       0.93, 0.89, 0.91, "340 additional orbital passes"),
+                ("geomagnetic_activity → thermospheric_density", 0.89, 0.86, 0.88, "geomagnetic storm event dataset"),
+            ]),
+            ("ground_station_01", "SWPC real-time feed, 6-month dataset", [
+                ("solar_wind_pressure → thermospheric_density",  0.88, 0.74, 0.82, "extended solar wind correlation"),
+            ]),
+        ],
+        "fleet_certainty": [
+            ("thermospheric_density → satellite_drag",       0.95, 4),
+            ("solar_euv_flux → thermospheric_density",       0.93, 4),
+            ("geomagnetic_activity → thermospheric_density", 0.91, 3),
+            ("seasonal_latitudinal → thermospheric_density", 0.87, 3),
+            ("joule_heating → thermospheric_density",        0.86, 2),
+            ("solar_wind_pressure → thermospheric_density",  0.84, 3),
+        ],
+        "bandwidth": "22.1 KB",
+    },
+    "robotics": {
+        "topology": [
+            ("arm_facility_a_01", "online",  "8s ago",  "7", ""),
+            ("arm_facility_a_02", "online",  "14s ago", "7", ""),
+            ("arm_facility_b_01", "online",  "3m ago",  "5", ""),
+            ("arm_testbench_01",  "online",  "2s ago",  "7", ""),
+            ("arm_facility_b_02", "offline", "2d ago",  "3", "maintenance — 4 updates queued (3.1 KB)"),
+        ],
+        "push_vectors": [
+            ("payload_mass_variation → grasp_force_error", 0.91, "ft_sensor_wrist"),
+            ("joint_friction_drift → trajectory_error",    0.88, "joint_encoder_rtde"),
+            ("trajectory_error → cycle_failure",           0.86, "joint_encoder_rtde"),
+        ],
+        "push_nodes": [
+            ("arm_facility_a_01", "received  ✓", "LAN, 2ms"),
+            ("arm_facility_a_02", "received  ✓", "LAN, 3ms"),
+            ("arm_facility_b_01", "received  ✓", "VPN, 42ms"),
+            ("arm_testbench_01",  "received  ✓", "LAN, 1ms"),
+            ("arm_facility_b_02", "queued   ⟳",  "offline — maintenance window, will sync on reconnect"),
+        ],
+        "pull_from": [
+            ("arm_facility_b_01", "environment: humid warehouse, 28°C ambient", [
+                ("ambient_temperature → joint_friction_drift", 0.81, 0.74, 0.78, "high-humidity friction dataset"),
+                ("surface_condition → grasp_force_error",      0.79, 0.72, 0.76, "warehouse floor surface profiles"),
+            ]),
+            ("arm_testbench_01", "controlled lab, 1,200-cycle stress test", [
+                ("controller_latency → trajectory_error",      0.87, 0.79, 0.83, "latency injection experiment"),
+            ]),
+        ],
+        "fleet_certainty": [
+            ("payload_mass_variation → grasp_force_error", 0.95, 4),
+            ("joint_friction_drift → trajectory_error",    0.93, 4),
+            ("trajectory_error → cycle_failure",           0.91, 3),
+            ("grasp_force_error → cycle_failure",          0.88, 3),
+            ("controller_latency → trajectory_error",      0.86, 3),
+            ("ambient_temperature → joint_friction_drift", 0.81, 2),
+        ],
+        "bandwidth": "19.7 KB",
+    },
+    "manufacturing": {
+        "topology": [
+            ("cnc_line_01",    "online",  "6s ago",  "7", ""),
+            ("cnc_line_02",    "online",  "11s ago", "7", ""),
+            ("cnc_line_03",    "online",  "28s ago", "5", ""),
+            ("cmm_station",    "online",  "90s ago", "7", ""),
+            ("qa_server",      "offline", "6h ago",  "3", "shift changeover — 2 updates queued (1.8 KB)"),
+        ],
+        "push_vectors": [
+            ("tool_wear → dimensional_deviation",   0.91, "cmm_inspection"),
+            ("dimensional_deviation → scrap_event", 0.88, "cmm_inspection"),
+            ("coolant_concentration → tool_wear",   0.86, "coolant_monitor + cmm"),
+        ],
+        "push_nodes": [
+            ("cnc_line_01", "received  ✓", "LAN, 1ms"),
+            ("cnc_line_02", "received  ✓", "LAN, 2ms"),
+            ("cnc_line_03", "received  ✓", "LAN, 2ms"),
+            ("cmm_station", "received  ✓", "LAN, 3ms"),
+            ("qa_server",   "queued   ⟳",  "shift changeover, will sync on restart"),
+        ],
+        "pull_from": [
+            ("cnc_line_02", "environment: line 2, titanium alloy batch", [
+                ("material_batch_hardness → dimensional_deviation", 0.88, 0.82, 0.85, "Ti-6Al-4V batch — 800 parts"),
+                ("tool_wear → dimensional_deviation",               0.94, 0.91, 0.93, "carbide tooling dataset"),
+            ]),
+            ("cmm_station", "post-process CMM, full inspection batch", [
+                ("dimensional_deviation → scrap_event",  0.93, 0.88, 0.91, "12,000-part inspection run"),
+            ]),
+        ],
+        "fleet_certainty": [
+            ("tool_wear → dimensional_deviation",              0.95, 4),
+            ("dimensional_deviation → scrap_event",            0.93, 4),
+            ("coolant_concentration → tool_wear",              0.91, 3),
+            ("material_batch_hardness → dimensional_deviation",0.88, 3),
+            ("ambient_temperature → dimensional_deviation",    0.86, 2),
+            ("coolant_concentration → surface_roughness",      0.81, 2),
+        ],
+        "bandwidth": "17.3 KB",
+    },
+    "data-centers": {
+        "topology": [
+            ("dc_zone_north",      "online",  "4s ago",  "7", ""),
+            ("dc_zone_south",      "online",  "9s ago",  "7", ""),
+            ("dc_zone_east",       "online",  "22s ago", "5", ""),
+            ("dc_crac_controller", "online",  "1s ago",  "7", ""),
+            ("dc_edge_monitor",    "offline", "3d ago",  "2", "network maintenance — 5 updates queued (3.8 KB)"),
+        ],
+        "push_vectors": [
+            ("it_workload → zone_temperature",   0.92, "rack_inlet_sensors + pdus"),
+            ("crac_airflow → zone_temperature",  0.91, "bms_crac_telemetry"),
+            ("zone_temperature → cooling_power", 0.88, "bms_crac_telemetry"),
+        ],
+        "push_nodes": [
+            ("dc_zone_north",      "received  ✓", "DC fabric, <1ms"),
+            ("dc_zone_south",      "received  ✓", "DC fabric, <1ms"),
+            ("dc_zone_east",       "received  ✓", "DC fabric, 1ms"),
+            ("dc_crac_controller", "received  ✓", "DC fabric, <1ms"),
+            ("dc_edge_monitor",    "queued   ⟳",  "network maintenance, will sync on reconnect"),
+        ],
+        "pull_from": [
+            ("dc_zone_south", "environment: south zone, high-density GPU racks", [
+                ("it_workload → zone_temperature",   0.96, 0.92, 0.94, "GPU rack thermal dataset — 90 days"),
+                ("rack_configuration → zone_temperature", 0.84, 0.77, 0.81, "dense rack layout study"),
+            ]),
+            ("dc_crac_controller", "environment: direct CRAC telemetry, full year", [
+                ("crac_airflow → zone_temperature",  0.95, 0.91, 0.93, "full-year airflow correlation"),
+            ]),
+        ],
+        "fleet_certainty": [
+            ("it_workload → zone_temperature",         0.96, 4),
+            ("crac_airflow → zone_temperature",        0.95, 4),
+            ("zone_temperature → cooling_power",       0.92, 3),
+            ("ambient_temperature → zone_temperature", 0.88, 3),
+            ("floor_tile_layout → zone_temperature",   0.86, 2),
+            ("rack_configuration → zone_temperature",  0.84, 3),
+        ],
+        "bandwidth": "14.8 KB",
+    },
+}
+
 
 def detect_domain(prior_text=None):
     """Detect domain from prior.md content. Returns domain key or 'default'."""
@@ -839,55 +1316,19 @@ Format output for terminal readability."""
         servers["validation"] = VALIDATION_MCP_URL
 
     if not servers:
-        # Simulate multiple cycles with progressive convergence
-        cycle_data = [
-            # (edge, z_before, z_after, epsilon, eta, source)
-            [
-                ("thermal_cycling → solder_joint_fatigue",  0.30, 0.38, 0.142, 0.285, "thermal_chamber"),
-                ("thermal_cycling → capacitor_esr_drift",   0.35, 0.44, 0.098, 0.278, "thermal_chamber + power_rail"),
-                ("voltage_ripple → clock_jitter",           0.40, 0.51, 0.067, 0.265, "power_rail_monitor"),
-                ("vibration_exposure → solder_joint_fatigue",0.25, 0.31, 0.189, 0.290, "vibration_table"),
-                ("solder_joint_fatigue → watchdog_reset",   0.30, 0.36, 0.156, 0.285, "thermal_chamber"),
-                ("capacitor_esr_drift → mcu_failure",       0.35, 0.42, 0.112, 0.278, "power_rail_monitor"),
-            ],
-            [
-                ("thermal_cycling → solder_joint_fatigue",  0.38, 0.49, 0.108, 0.270, "thermal_chamber"),
-                ("thermal_cycling → capacitor_esr_drift",   0.44, 0.56, 0.071, 0.248, "thermal_chamber + power_rail"),
-                ("voltage_ripple → clock_jitter",           0.51, 0.63, 0.043, 0.222, "power_rail_monitor"),
-                ("vibration_exposure → solder_joint_fatigue",0.31, 0.40, 0.161, 0.282, "vibration_table"),
-                ("solder_joint_fatigue → watchdog_reset",   0.36, 0.45, 0.129, 0.275, "thermal_chamber"),
-                ("capacitor_esr_drift → mcu_failure",       0.42, 0.53, 0.088, 0.258, "power_rail_monitor"),
-            ],
-            [
-                ("thermal_cycling → solder_joint_fatigue",  0.49, 0.61, 0.082, 0.240, "thermal_chamber"),
-                ("thermal_cycling → capacitor_esr_drift",   0.56, 0.68, 0.048, 0.203, "thermal_chamber + power_rail"),
-                ("voltage_ripple → clock_jitter",           0.63, 0.74, 0.029, 0.170, "power_rail_monitor"),
-                ("vibration_exposure → solder_joint_fatigue",0.40, 0.50, 0.134, 0.268, "vibration_table"),
-                ("solder_joint_fatigue → watchdog_reset",   0.45, 0.55, 0.101, 0.250, "thermal_chamber"),
-                ("capacitor_esr_drift → mcu_failure",       0.53, 0.64, 0.063, 0.218, "power_rail_monitor"),
-            ],
-            [
-                ("thermal_cycling → solder_joint_fatigue",  0.61, 0.72, 0.058, 0.183, "thermal_chamber"),
-                ("thermal_cycling → capacitor_esr_drift",   0.68, 0.78, 0.031, 0.140, "thermal_chamber + power_rail"),
-                ("voltage_ripple → clock_jitter",           0.74, 0.83, 0.018, 0.112, "power_rail_monitor"),
-                ("vibration_exposure → solder_joint_fatigue",0.50, 0.60, 0.109, 0.238, "vibration_table"),
-                ("solder_joint_fatigue → watchdog_reset",   0.55, 0.65, 0.078, 0.210, "thermal_chamber"),
-                ("capacitor_esr_drift → mcu_failure",       0.64, 0.74, 0.042, 0.170, "power_rail_monitor"),
-            ],
-            [
-                ("thermal_cycling → solder_joint_fatigue",  0.72, 0.81, 0.037, 0.125, "thermal_chamber"),
-                ("thermal_cycling → capacitor_esr_drift",   0.78, 0.86, 0.019, 0.091, "thermal_chamber + power_rail"),
-                ("voltage_ripple → clock_jitter",           0.83, 0.89, 0.011, 0.065, "power_rail_monitor"),
-                ("vibration_exposure → solder_joint_fatigue",0.60, 0.69, 0.086, 0.195, "vibration_table"),
-                ("solder_joint_fatigue → watchdog_reset",   0.65, 0.74, 0.055, 0.162, "thermal_chamber"),
-                ("capacitor_esr_drift → mcu_failure",       0.74, 0.82, 0.028, 0.118, "power_rail_monitor"),
-            ],
-        ]
+        domain = detect_domain()
+        edge_defs = DOMAIN_LEARN_DATA.get(domain, [
+            ("thermal_cycling → solder_joint_fatigue",   0.30, "thermal_chamber"),
+            ("thermal_cycling → capacitor_esr_drift",    0.35, "thermal_chamber + power_rail"),
+            ("voltage_ripple → clock_jitter",            0.40, "power_rail_monitor"),
+            ("vibration_exposure → solder_joint_fatigue",0.25, "vibration_table"),
+            ("solder_joint_fatigue → watchdog_reset",    0.30, "thermal_chamber"),
+            ("capacitor_esr_drift → mcu_failure",        0.35, "power_rail_monitor"),
+        ])
+        cycle_data = _make_cycle_data(edge_defs, max(args.cycles, 5))
 
         for cycle in range(1, args.cycles + 1):
-            data_idx = min(cycle - 1, len(cycle_data) - 1)
-            edges = cycle_data[data_idx]
-
+            edges = cycle_data[cycle - 1]
             print(f"  ── Cycle {cycle}/{args.cycles} ──")
             print()
             for edge, z_b, z_a, eps, eta, src in edges:
@@ -895,20 +1336,17 @@ Format output for terminal readability."""
                 print(f"    {edge}")
                 print(f"      ε={eps:.3f}  η(Z)={eta:.3f}  Z: {z_b:.2f} → {z_a:.2f}  {arrow}  [{src}]")
             print()
-
-            # Show threshold crossings
             crossings = [(e, z_a) for e, z_b, z_a, _, _, _ in edges if z_b < 0.85 and z_a >= 0.85]
             if crossings:
                 for e, z in crossings:
                     print(f"    ⚡ {e}  CROSSED Z=0.85 — ready for injection")
                 print()
 
-        # Final summary
-        final = cycle_data[min(args.cycles - 1, len(cycle_data) - 1)]
-        print("  SUMMARY:")
+        final = cycle_data[args.cycles - 1]
         high = sum(1 for _, _, z_a, _, _, _ in final if z_a >= 0.85)
-        med = sum(1 for _, _, z_a, _, _, _ in final if 0.50 <= z_a < 0.85)
-        low = sum(1 for _, _, z_a, _, _, _ in final if z_a < 0.50)
+        med  = sum(1 for _, _, z_a, _, _, _ in final if 0.50 <= z_a < 0.85)
+        low  = sum(1 for _, _, z_a, _, _, _ in final if z_a < 0.50)
+        print("  SUMMARY:")
         print(f"    High certainty (Z ≥ 0.85):  {high} edges")
         print(f"    Medium (0.50 ≤ Z < 0.85):   {med} edges")
         print(f"    Low (Z < 0.50):              {low} edges")
@@ -964,40 +1402,80 @@ Use simple ASCII formatting — no markdown."""
         servers["validation"] = VALIDATION_MCP_URL
 
     if not servers:
-        print("  CERTAINTY DISTRIBUTION")
-        print("  ├── High (Z ≥ 0.85): ██████░░░░░░   2 edges  (ready for injection)")
-        print("  ├── Med  (0.5-0.85): ████████████   4 edges  (learning)")
-        print("  └── Low  (Z < 0.50): ████░░░░░░░░   0 edges")
-        print()
-        print("  EDGE DETAIL:")
-        print("  ├── voltage_ripple → clock_jitter              Z=0.89  ████████████████▓░░░  READY")
-        print("  ├── thermal_cycling → capacitor_esr_drift      Z=0.86  █████████████████░░░  READY")
-        print("  ├── thermal_cycling → solder_joint_fatigue     Z=0.81  ████████████████░░░░  learning")
-        print("  ├── capacitor_esr_drift → mcu_failure          Z=0.82  ████████████████░░░░  learning")
-        print("  ├── solder_joint_fatigue → watchdog_reset      Z=0.74  ██████████████░░░░░░  learning")
-        print("  └── vibration_exposure → solder_joint_fatigue  Z=0.69  █████████████░░░░░░░  learning")
-        print()
-        print("  CURIOSITY TRIGGERS:")
-        print("  ├── vibration_exposure → solder_joint_fatigue  Z=0.69")
-        print("  │   Slowest convergence. Consider: additional vibration profiles,")
-        print("  │   frequency-dependent effects, or missing confounders.")
-        print("  │")
-        print("  └── solder_joint_fatigue → watchdog_reset      Z=0.74")
-        print("      High residual error despite rising Z. Possible intermittent")
-        print("      contact — failure mode may be stochastic, not deterministic.")
-        print()
-        print("  VALIDATION PIPELINE STATUS:")
-        print("  ├── thermal_chamber_api     ✓ active    last signal: 12s ago")
-        print("  ├── power_rail_monitor      ✓ active    last signal: 3s ago")
-        print("  └── vibration_table_daq     ✓ active    last signal: 8s ago")
-        print()
-        print("  RECENT LEARNING (last 5 cycles):")
-        print("  ├── voltage_ripple → clock_jitter          Z: 0.74 → 0.89  ↑ (+0.15)")
-        print("  ├── thermal_cycling → capacitor_esr_drift  Z: 0.68 → 0.86  ↑ (+0.18)")
-        print("  ├── thermal_cycling → solder_joint_fatigue Z: 0.61 → 0.81  ↑ (+0.20)")
-        print("  ├── capacitor_esr_drift → mcu_failure      Z: 0.64 → 0.82  ↑ (+0.18)")
-        print("  ├── solder_joint_fatigue → watchdog_reset  Z: 0.55 → 0.74  ↑ (+0.19)")
-        print("  └── vibration_exposure → solder_joint_fat. Z: 0.50 → 0.69  ↑ (+0.19)")
+        domain = detect_domain()
+        sdata = DOMAIN_STATUS_DATA.get(domain)
+
+        if sdata:
+            edges = sdata["edges"]
+            high = sum(1 for _, _, s in edges if s == "READY")
+            med  = sum(1 for _, _, s in edges if s == "learning")
+            bar_high = "█" * (high * 4) + "░" * (20 - high * 4)
+            bar_med  = "█" * (med  * 3) + "░" * (20 - med  * 3)
+            print("  CERTAINTY DISTRIBUTION")
+            print(f"  ├── High (Z ≥ 0.85): {bar_high[:12]}   {high} edges  (ready for injection)")
+            print(f"  ├── Med  (0.5-0.85): {bar_med[:12]}   {med} edges  (learning)")
+            print(f"  └── Low  (Z < 0.50): ░░░░░░░░░░░░   0 edges")
+            print()
+            print("  EDGE DETAIL:")
+            for i, (label, z, status) in enumerate(edges):
+                prefix = "└──" if i == len(edges) - 1 else "├──"
+                filled = int(z * 20)
+                bar = "█" * filled + "░" * (20 - filled)
+                print(f"  {prefix} {label:<48} Z={z:.2f}  {bar}  {status}")
+            print()
+            print("  CURIOSITY TRIGGERS:")
+            for i, (label, z, note) in enumerate(sdata["curiosity"]):
+                is_last = (i == len(sdata["curiosity"]) - 1)
+                print(f"  ├── {label}  Z={z:.2f}")
+                indent = "      " if is_last else "  │   "
+                print(f"  │   {note}")
+                if not is_last:
+                    print("  │")
+            print()
+            print("  VALIDATION PIPELINE STATUS:")
+            eps = sdata["endpoints"]
+            for i, (name, status, when) in enumerate(eps):
+                prefix = "└──" if i == len(eps) - 1 else "├──"
+                print(f"  {prefix} {name:<28} ✓ {status:<8}  last signal: {when}")
+            # compute recent learning from DOMAIN_LEARN_DATA
+            edge_defs = DOMAIN_LEARN_DATA.get(domain, [])
+            if edge_defs:
+                print()
+                print("  RECENT LEARNING (last 5 cycles):")
+                cycles = _make_cycle_data(edge_defs, 5)
+                start_z = {label: z0 for label, z0, _ in edge_defs}
+                final = cycles[-1]
+                for i, (label, _, z_a, _, _, _) in enumerate(final):
+                    prefix = "└──" if i == len(final) - 1 else "├──"
+                    z0 = start_z[label]
+                    delta = round(z_a - z0, 2)
+                    print(f"  {prefix} {label}  Z: {z0:.2f} → {z_a:.2f}  ↑ (+{delta:.2f})")
+        else:
+            # default MCU output
+            print("  CERTAINTY DISTRIBUTION")
+            print("  ├── High (Z ≥ 0.85): ██████░░░░░░   2 edges  (ready for injection)")
+            print("  ├── Med  (0.5-0.85): ████████████   4 edges  (learning)")
+            print("  └── Low  (Z < 0.50): ████░░░░░░░░   0 edges")
+            print()
+            print("  EDGE DETAIL:")
+            print("  ├── voltage_ripple → clock_jitter              Z=0.89  ████████████████▓░░░  READY")
+            print("  ├── thermal_cycling → capacitor_esr_drift      Z=0.86  █████████████████░░░  READY")
+            print("  ├── thermal_cycling → solder_joint_fatigue     Z=0.81  ████████████████░░░░  learning")
+            print("  ├── capacitor_esr_drift → mcu_failure          Z=0.82  ████████████████░░░░  learning")
+            print("  ├── solder_joint_fatigue → watchdog_reset      Z=0.74  ██████████████░░░░░░  learning")
+            print("  └── vibration_exposure → solder_joint_fatigue  Z=0.69  █████████████░░░░░░░  learning")
+            print()
+            print("  CURIOSITY TRIGGERS:")
+            print("  ├── vibration_exposure → solder_joint_fatigue  Z=0.69")
+            print("  │   Slowest convergence. Consider: additional vibration profiles.")
+            print("  │")
+            print("  └── solder_joint_fatigue → watchdog_reset      Z=0.74")
+            print("      High residual error — failure mode may be stochastic.")
+            print()
+            print("  VALIDATION PIPELINE STATUS:")
+            print("  ├── thermal_chamber_api     ✓ active    last signal: 12s ago")
+            print("  ├── power_rail_monitor      ✓ active    last signal: 3s ago")
+            print("  └── vibration_table_daq     ✓ active    last signal: 8s ago")
         print()
         print("  Next: 'nm learn --cycles 3' to push remaining edges past Z=0.85")
         return
@@ -1121,29 +1599,43 @@ Only inject vectors with certainty > {threshold}. Report what was included and e
     print()
 
     if not DOMAIN_HEADS_MCP_URL or not CVOT_MCP_URL:
+        domain = detect_domain()
+        idata = DOMAIN_INJECT_DATA.get(domain)
+
         print(f"  THRESHOLD:   Z > {threshold}")
         print(f"  Base model:  {base_model} (frozen — no weights modified)")
         print()
         print("  APPROVAL GATE — Only validated causal edges are promoted:")
         print()
-        print("  ✓ APPROVED (3 edges — validated above threshold):")
-        print("  ├── voltage_ripple → clock_jitter              Z=0.89")
-        print("  │   Evidence: 847 prediction-error cycles, 3 independent endpoints")
-        print("  ├── thermal_cycling → capacitor_esr_drift      Z=0.86")
-        print("  │   Evidence: 612 cycles, thermal chamber + power rail cross-validated")
-        print("  └── capacitor_esr_drift → mcu_functional_failure Z=0.86")
-        print("      Evidence: 589 cycles, ESR drift correlated with functional test")
+
+        approved = idata["approved"] if idata else [
+            ("voltage_ripple → clock_jitter",             0.89, "847 cycles, 3 independent endpoints"),
+            ("thermal_cycling → capacitor_esr_drift",     0.86, "612 cycles, thermal + power rail cross-validated"),
+            ("capacitor_esr_drift → mcu_functional_failure",0.86,"589 cycles, ESR correlated with functional test"),
+        ]
+        held = idata["held"] if idata else [
+            ("thermal_cycling → solder_joint_fatigue",    0.81, "↑ close"),
+            ("solder_joint_fatigue → watchdog_reset",     0.74, "↑ learning"),
+            ("vibration_exposure → solder_joint_fatigue", 0.69, "↑ learning"),
+        ]
+
+        print(f"  ✓ APPROVED ({len(approved)} edges — validated above threshold):")
+        for i, (label, z, evidence) in enumerate(approved):
+            prefix = "└──" if i == len(approved) - 1 else "├──"
+            connector = "    " if i == len(approved) - 1 else "│   "
+            print(f"  {prefix} {label}  Z={z:.2f}")
+            print(f"  {connector} Evidence: {evidence}")
         print()
-        print(f"  ✗ HELD BACK (3 edges — still learning, below Z > {threshold}):")
-        print("  ├── thermal_cycling → solder_joint_fatigue     Z=0.81  ↑ close")
-        print("  ├── solder_joint_fatigue → watchdog_reset      Z=0.74  ↑ learning")
-        print("  └── vibration_exposure → solder_joint_fatigue  Z=0.69  ↑ learning")
+        print(f"  ✗ HELD BACK ({len(held)} edges — still learning, below Z > {threshold}):")
+        for i, (label, z, note) in enumerate(held):
+            prefix = "└──" if i == len(held) - 1 else "├──"
+            print(f"  {prefix} {label}  Z={z:.2f}  {note}")
         print()
         print("  Only validated causal knowledge is injected.")
         print("  Held-back edges continue learning until they reach threshold.")
         print()
         print("  Next: nm train    (train on approved edges)")
-        print("        nm deploy   (compile for edge/cloud/microcontroller)")
+        print("        nm deploy   (compile for edge/cloud)")
         return
 
     result = call_with_mcp(
@@ -1191,6 +1683,17 @@ This should be FAST — minutes, not hours — because only ~5-10M params update
     print()
 
     if not DOMAIN_HEADS_MCP_URL:
+        domain = detect_domain()
+        tdata = DOMAIN_TRAIN_DATA.get(domain, {
+            "accuracy":    ("84.7%", "43.1%", "fault diagnosis"),
+            "auroc":       ("0.91",  "capacitor ESR drift"),
+            "calibration": "0.89",
+            "retention":   "95.2%",
+            "capability":  "MCU failure modes",
+        })
+        acc, acc_base, acc_task = tdata["accuracy"]
+        auroc, auroc_edge = tdata["auroc"]
+
         print("  TRAINING...")
         time.sleep(0.5)
         print("  ├── Epoch 1/{0}  converging...".format(epochs))
@@ -1199,20 +1702,22 @@ This should be FAST — minutes, not hours — because only ~5-10M params update
             connector = "└" if e == epochs else "├"
             print(f"  {connector}── Epoch {e}/{epochs}  converging...")
         print()
-        print("  RESULTS (MCU Reliability Domain):")
+        print(f"  RESULTS [{domain}]:")
         print("  ┌──────────────────────────────────────────────────────────┐")
-        print("  │  Fault diagnosis accuracy:    84.7%  (vs 43.1% base)    │")
-        print("  │  Failure prediction (AUROC):  0.91   (capacitor ESR)    │")
-        print("  │  Uncertainty calibration:     0.89   (well-calibrated)  │")
-        print("  │  Domain knowledge retention:  95.2%  (no forgetting)    │")
+        print(f"  │  {acc_task.capitalize()} accuracy: {acc:>6}  (vs {acc_base} base)          │")
+        print(f"  │  Causal prediction (AUROC):  {auroc}                       │")
+        print(f"  │    {auroc_edge}              │")
+        print(f"  │  Uncertainty calibration:    {tdata['calibration']}   (well-calibrated)  │")
+        print(f"  │  Domain knowledge retention: {tdata['retention']}  (no forgetting)    │")
         print("  └──────────────────────────────────────────────────────────┘")
         print()
         print("  Training time: ~8 minutes on 1x GPU")
         print("  Base model weights: UNCHANGED (frozen)")
         print()
-        print("  The model can now reason causally about MCU failure modes.")
+        print(f"  The model can now reason causally about {tdata['capability']}.")
         print()
-        print("  Next: nm deploy --target microcontroller")
+        deploy_target = DOMAIN_DEPLOY_TARGETS.get(domain, "microcontroller")
+        print(f"  Next: nm deploy --target {deploy_target}")
         return
 
     result = call_with_mcp(
@@ -1460,27 +1965,49 @@ Push high-certainty updates to deployed adapters. Report what changed."""
         servers["domain_heads"] = DOMAIN_HEADS_MCP_URL
 
     if not servers:
+        domain = detect_domain()
+        udata = DOMAIN_UPDATE_DATA.get(domain, {
+            "increases": [
+                ("voltage_ripple → clock_jitter",         0.89, 0.93, 0.04),
+                ("thermal_cycling → capacitor_esr_drift", 0.86, 0.91, 0.05),
+                ("capacitor_esr_drift → mcu_failure",     0.86, 0.89, 0.03),
+            ],
+            "new_high": [
+                ("thermal_cycling → solder_joint_fatigue", 0.81, 0.87, "thermal chamber validation"),
+                ("solder_joint_fatigue → watchdog_reset",  0.74, 0.86, "reset counter correlation"),
+            ],
+            "deployed": [
+                ("ecu_testbench_01",    "5 vectors updated  ✓"),
+                ("production_line_qa",  "5 vectors updated  ✓"),
+                ("field_fleet_monitor", "5 vectors updated  ✓"),
+            ],
+            "context": "MCU failure modes. New edges learned from test lab data.",
+        })
+
         print("  CHECKING FOR UPDATES SINCE LAST DEPLOY...")
         print()
         print("  CERTAINTY INCREASES:")
-        print("  ├── voltage_ripple → clock_jitter              Z: 0.89 → 0.93  Δ+0.04")
-        print("  ├── thermal_cycling → capacitor_esr_drift      Z: 0.86 → 0.91  Δ+0.05")
-        print("  └── capacitor_esr_drift → mcu_failure          Z: 0.86 → 0.89  Δ+0.03")
+        inc = udata["increases"]
+        for i, (label, z_old, z_new, delta) in enumerate(inc):
+            prefix = "└──" if i == len(inc) - 1 else "├──"
+            print(f"  {prefix} {label}  Z: {z_old:.2f} → {z_new:.2f}  Δ+{delta:.2f}")
         print()
         print("  NEW HIGH-CERTAINTY EDGES:")
-        print("  ├── thermal_cycling → solder_joint_fatigue     Z: 0.81 → 0.87  ⚡ NEW")
-        print("  │   (crossed 0.85 via thermal chamber validation)")
-        print("  └── solder_joint_fatigue → watchdog_reset      Z: 0.74 → 0.86  ⚡ NEW")
-        print("      (crossed 0.85 via reset counter correlation)")
+        new = udata["new_high"]
+        for i, (label, z_old, z_new, source) in enumerate(new):
+            prefix = "└──" if i == len(new) - 1 else "├──"
+            connector = "    " if i == len(new) - 1 else "│   "
+            print(f"  {prefix} {label}  Z: {z_old:.2f} → {z_new:.2f}  ⚡ NEW")
+            print(f"  {connector} (crossed 0.85 via {source})")
         print()
         print("  PUSHED TO DEPLOYED INSTANCES:")
-        print("  ├── ecu_testbench_01:     5 vectors updated  ✓")
-        print("  ├── production_line_qa:   5 vectors updated  ✓")
-        print("  └── field_fleet_monitor:  5 vectors updated  ✓")
+        dep = udata["deployed"]
+        for i, (name, status) in enumerate(dep):
+            prefix = "└──" if i == len(dep) - 1 else "├──"
+            print(f"  {prefix} {name:<28} {status}")
         print()
         print("  Deployed models updated. No retraining. No downtime.")
-        print("  The model in the field now knows about solder joint fatigue")
-        print("  and its link to watchdog resets — learned from test lab data.")
+        print(f"  {udata['context']}")
         print()
         print("  Next: nm fleet   (share learning across fleet, ~1KB per update)")
         return
@@ -1513,34 +2040,78 @@ def cmd_fleet(args):
     print("  └───────────────────────────────────────────────────┘")
     print()
 
+    domain = detect_domain()
+    fdata = DOMAIN_FLEET_DATA.get(domain)
+
+    # fall back to MCU defaults if no domain data
+    if not fdata:
+        fdata = {
+            "topology": [
+                ("ecu_testbench_01",   "online",  "12s ago",  "6", ""),
+                ("production_line_qa", "online",  "45s ago",  "6", ""),
+                ("field_unit_alpha",   "online",  "8m ago",   "4", ""),
+                ("field_unit_bravo",   "offline", "2d ago",   "3", "DDIL — 2 pending updates (2.1 KB)"),
+                ("field_unit_charlie", "online",  "3m ago",   "5", ""),
+            ],
+            "push_vectors": [
+                ("voltage_ripple → clock_jitter",         0.89, "power_rail_monitor"),
+                ("thermal_cycling → capacitor_esr_drift", 0.86, "thermal_chamber_api"),
+                ("solder_joint_fatigue → watchdog_reset", 0.87, "field observation"),
+            ],
+            "push_nodes": [
+                ("ecu_testbench_01",   "received  ✓", "LAN, 2ms"),
+                ("production_line_qa", "received  ✓", "LAN, 3ms"),
+                ("field_unit_alpha",   "received  ✓", "satellite, 1.4s"),
+                ("field_unit_bravo",   "queued   ⟳",  "DDIL — will sync on reconnect"),
+                ("field_unit_charlie", "received  ✓", "burst radio, 340ms"),
+            ],
+            "pull_from": [
+                ("field_unit_alpha", "desert, 55°C ambient", [
+                    ("thermal_cycling → capacitor_esr_drift",     0.91, 0.86, 0.89, "high-temp aging data"),
+                    ("vibration_exposure → solder_joint_fatigue", 0.88, 0.69, 0.79, "off-road vibration profiles"),
+                ]),
+                ("production_line_qa", "factory floor", [
+                    ("capacitor_esr_drift → mcu_failure", 0.93, 0.86, 0.90, "12,000-unit batch validation"),
+                ]),
+            ],
+            "fleet_certainty": [
+                ("voltage_ripple → clock_jitter",             0.92, 5),
+                ("thermal_cycling → capacitor_esr_drift",     0.91, 4),
+                ("capacitor_esr_drift → mcu_failure",         0.93, 3),
+                ("thermal_cycling → solder_joint_fatigue",    0.87, 3),
+                ("solder_joint_fatigue → watchdog_reset",     0.86, 2),
+                ("vibration_exposure → solder_joint_fatigue", 0.79, 2),
+            ],
+            "bandwidth": "18.4 KB",
+        }
+
     if mode == "push":
         print("  MODE: push (broadcast local learning to fleet)")
         print()
         print("  PACKAGING LOCAL VECTORS...")
         print()
         print("  Vectors to share (locally validated, Z > 0.85):")
-        print("  ├── voltage_ripple → clock_jitter              Z=0.89  ✓")
-        print("  │   Learned from: power_rail_monitor (local sensor)")
-        print("  ├── thermal_cycling → capacitor_esr_drift      Z=0.86  ✓")
-        print("  │   Learned from: thermal_chamber_api (local sensor)")
-        print("  └── solder_joint_fatigue → watchdog_reset      Z=0.87  ✓")
-        print("      Learned from: field observation (847 resets correlated)")
+        pvecs = fdata["push_vectors"]
+        for i, (label, z, source) in enumerate(pvecs):
+            prefix = "└──" if i == len(pvecs) - 1 else "├──"
+            connector = "    " if i == len(pvecs) - 1 else "│   "
+            print(f"  {prefix} {label}  Z={z:.2f}  ✓")
+            print(f"  {connector} Learned from: {source}")
         print()
         print("  TRANSFER PAYLOAD:")
         print("  ┌──────────────────────────────────────────────────────────┐")
-        print("  │  Format:     Causal Vector Delta (CVD)                  │")
-        print("  │  Vectors:    3 edges × certainty + mechanism + threshold│")
-        print("  │  Size:       1.2 KB                                     │")
-        print("  │  Signature:  HMAC-SHA256 (tamper-proof)                 │")
-        print("  │  Encoding:   CBOR (binary, compact)                     │")
+        print(f"  │  Format:     Causal Vector Delta (CVD)                  │")
+        print(f"  │  Vectors:    {len(pvecs)} edges × certainty + mechanism + threshold│")
+        print(f"  │  Size:       1.2 KB                                     │")
+        print(f"  │  Signature:  HMAC-SHA256 (tamper-proof)                 │")
+        print(f"  │  Encoding:   CBOR (binary, compact)                     │")
         print("  └──────────────────────────────────────────────────────────┘")
         print()
         print("  BROADCAST TO FLEET:")
-        print("  ├── ecu_testbench_01:     received  ✓  (LAN, 2ms)")
-        print("  ├── production_line_qa:   received  ✓  (LAN, 3ms)")
-        print("  ├── field_unit_alpha:     received  ✓  (satellite, 1.4s)")
-        print("  ├── field_unit_bravo:     queued    ⟳  (DDIL — will sync on reconnect)")
-        print("  └── field_unit_charlie:   received  ✓  (burst radio, 340ms)")
+        pnodes = fdata["push_nodes"]
+        for i, (name, status, transport) in enumerate(pnodes):
+            prefix = "└──" if i == len(pnodes) - 1 else "├──"
+            print(f"  {prefix} {name:<24} {status}  ({transport})")
         print()
         print("  1.2 KB transmitted. Fleet updated. No cloud dependency.")
 
@@ -1548,58 +2119,59 @@ def cmd_fleet(args):
         print("  MODE: pull (receive fleet learning into local graph)")
         print()
         print("  INCOMING VECTORS FROM FLEET:")
-        print()
-        print("  From field_unit_alpha (operating environment: desert, 55°C ambient):")
-        print("  ├── thermal_cycling → capacitor_esr_drift      Z=0.91")
-        print("  │   New evidence: high-temp accelerated aging data")
-        print("  │   Local Z was 0.86 → merging to 0.89 (weighted by cycle count)")
-        print("  └── vibration_exposure → solder_joint_fatigue  Z=0.88")
-        print("      New evidence: off-road vibration profiles")
-        print("      Local Z was 0.69 → merging to 0.79 (new environment data)")
-        print()
-        print("  From production_line_qa (operating environment: factory floor):")
-        print("  └── capacitor_esr_drift → mcu_functional_failure Z=0.93")
-        print("      New evidence: 12,000-unit production batch validation")
-        print("      Local Z was 0.86 → merging to 0.90 (high sample count)")
+        total_kb = 0.0
+        sources = fdata["pull_from"]
+        for node, env, vectors in sources:
+            print()
+            print(f"  From {node} (environment: {env}):")
+            for i, (label, z_peer, z_local, z_merged, evidence) in enumerate(vectors):
+                prefix = "└──" if i == len(vectors) - 1 else "├──"
+                connector = "    " if i == len(vectors) - 1 else "│   "
+                print(f"  {prefix} {label}  Z={z_peer:.2f}")
+                print(f"  {connector} New evidence: {evidence}")
+                print(f"  {connector} Local Z was {z_local:.2f} → merging to {z_merged:.2f} (weighted by cycle count)")
+            total_kb += round(len(vectors) * 0.9, 1)
         print()
         print("  MERGE STRATEGY:")
         print("  ├── Weighted by validation cycle count (more data = more weight)")
-        print("  ├── Environment tags preserved (desert ≠ factory ≠ arctic)")
+        print("  ├── Environment tags preserved (each deployment context stays separate)")
         print("  └── Conflict resolution: keep highest-evidence vector per environment")
+        total_edges = sum(len(v) for _, _, v in sources)
         print()
         print("  LOCAL GRAPH UPDATED:")
-        print("  ├── 3 edges improved (Z increased)")
-        print("  ├── 0 conflicts detected")
-        print("  └── 0 regressions (no Z decreased)")
+        print(f"  ├── {total_edges} edges improved (Z increased)")
+        print(f"  ├── 0 conflicts detected")
+        print(f"  └── 0 regressions (no Z decreased)")
         print()
-        print("  Total received: 2.8 KB from 2 peers. No retraining.")
+        print(f"  Total received: {total_kb:.1f} KB from {len(sources)} peers. No retraining.")
 
     elif mode == "status":
         print("  MODE: status (fleet sync overview)")
         print()
         print("  FLEET TOPOLOGY:")
-        print("  ├── ecu_testbench_01       online    last sync: 12s ago    vectors: 6")
-        print("  ├── production_line_qa     online    last sync: 45s ago    vectors: 6")
-        print("  ├── field_unit_alpha       online    last sync: 8m ago     vectors: 4")
-        print("  ├── field_unit_bravo       offline   last sync: 2d ago     vectors: 3")
-        print("  │   └── ⚠ DDIL — 2 pending vector updates queued (2.1 KB)")
-        print("  └── field_unit_charlie     online    last sync: 3m ago     vectors: 5")
+        topo = fdata["topology"]
+        for i, (name, status, sync, vecs, note) in enumerate(topo):
+            prefix = "└──" if (i == len(topo) - 1 and not note) else "├──"
+            print(f"  {prefix} {name:<24} {status:<8}  last sync: {sync:<12}  vectors: {vecs}")
+            if note:
+                sub_prefix = "    └──" if i == len(topo) - 1 else "│   └──"
+                print(f"  {sub_prefix} ⚠ DDIL — {note}")
         print()
         print("  FLEET CERTAINTY (merged across all peers):")
-        print("  ├── voltage_ripple → clock_jitter              Z=0.92  (5 sources)")
-        print("  ├── thermal_cycling → capacitor_esr_drift      Z=0.91  (4 sources)")
-        print("  ├── capacitor_esr_drift → mcu_functional_failure Z=0.93  (3 sources)")
-        print("  ├── thermal_cycling → solder_joint_fatigue     Z=0.87  (3 sources)")
-        print("  ├── solder_joint_fatigue → watchdog_reset      Z=0.86  (2 sources)")
-        print("  └── vibration_exposure → solder_joint_fatigue  Z=0.79  (2 sources)")
+        fc = fdata["fleet_certainty"]
+        for i, (label, z, sources) in enumerate(fc):
+            prefix = "└──" if i == len(fc) - 1 else "├──"
+            print(f"  {prefix} {label:<48} Z={z:.2f}  ({sources} sources)")
         print()
+        bw = fdata["bandwidth"]
+        n = len(topo)
         print("  BANDWIDTH SUMMARY:")
-        print("  ├── Total data transferred (last 24h):    18.4 KB")
-        print("  ├── Largest single transfer:               1.8 KB")
-        print("  ├── Smallest single transfer:              0.4 KB")
-        print("  └── Average transfer:                      1.1 KB")
+        print(f"  ├── Total data transferred (last 24h):    {bw}")
+        print(f"  ├── Largest single transfer:               1.8 KB")
+        print(f"  ├── Smallest single transfer:              0.4 KB")
+        print(f"  └── Average transfer:                      1.1 KB")
         print()
-        print("  Fleet learning active. 5 nodes. 18.4 KB total bandwidth in 24h.")
+        print(f"  Fleet learning active. {n} nodes. {bw} total bandwidth in 24h.")
     print()
     print("  Next: nm contribute  (push anonymized vectors to global prior)")
 
