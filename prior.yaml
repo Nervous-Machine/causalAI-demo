@@ -1,0 +1,143 @@
+# nm prior config — schema v0.1
+# The prior defines WHAT to learn: system model, causal hypotheses, and sources.
+# This is the structured format. Natural language .md files are also valid —
+# the LLM parses them into this schema automatically.
+
+domain: data-centers
+entity: thermal-management
+scope: per-zone  # per-zone | per-facility | per-device | fleet
+
+# --- SOURCES ---
+# Where the system builds its starting hypotheses from.
+# Multiple sources can be combined. Stronger sources → higher starting certainty.
+
+sources:
+
+  # Type 1: Natural language prior (Z=0.25–0.40)
+  # An engineer writes what they know. LLM extracts causal structure.
+  - type: document
+    format: markdown
+    path: ./prior.md
+    confidence: low           # low | medium | high
+    description: "Domain expert knowledge in natural language"
+
+  # Type 2: Simulation outputs (Z=0.60–0.70)
+  # CFD, FEA, or other simulation sensitivity data.
+  # - type: simulation
+  #   format: csv | json | hdf5
+  #   path: ./cfd_sensitivity_analysis.csv
+  #   confidence: medium
+  #   mapping:
+  #     independent_vars: [supply_air_temp, fan_speed, rack_power]
+  #     dependent_vars: [zone_temperature, plenum_pressure]
+  #     sensitivity_matrix: true    # if available, maps directly to edge weights
+  #   description: "CFD thermal sensitivity analysis for Data Hall B"
+
+  # Type 3: Digital twin / world model API (Z=0.70–0.85)
+  # Live connection to a running simulation or surrogate model.
+  # - type: world_model
+  #   format: api
+  #   endpoint: https://twin.vertiv.internal/api/v1/predict
+  #   auth: bearer_token
+  #   confidence: high
+  #   mapping:
+  #     input_schema: openapi          # or json_schema, protobuf
+  #     prediction_fields: [zone_temp_predicted, pue_predicted]
+  #   poll_interval: 300               # seconds — used for continuous sim-to-real comparison
+  #   description: "Vertiv digital twin for facility DEN-01"
+
+  # Type 4: Equipment documentation (Z=0.20–0.35)
+  # Manuals, spec sheets, design docs. LLM extracts physics and relationships.
+  # - type: documentation
+  #   format: pdf | markdown | html
+  #   paths:
+  #     - ./docs/liebert_pex_manual.pdf
+  #     - ./docs/environet_api_spec.md
+  #   confidence: low
+  #   description: "Liebert PEX thermal unit specs and Environet API documentation"
+
+  # Type 5: Historical incident data (Z=0.30–0.50)
+  # Past incidents with known root causes. LLM extracts causal patterns.
+  # - type: incidents
+  #   format: csv | json
+  #   path: ./incidents_2024_2025.csv
+  #   confidence: low-medium
+  #   mapping:
+  #     timestamp: incident_date
+  #     description: incident_summary
+  #     root_cause: root_cause_field
+  #     resolution: resolution_field
+  #   description: "18 months of thermal incidents with engineer-validated root causes"
+
+# --- CAUSAL HYPOTHESES ---
+# Explicitly declared edges with expected behavior.
+# When sources include simulation or world model data, these can be
+# auto-generated from the sensitivity matrix. When the source is a
+# document or domain expert, the LLM extracts these from the text.
+
+hypotheses:
+
+  - cause: it_workload
+    effect: zone_temperature
+    expected_weight: dominant
+    lag: 2-10 min
+    signature: "rack inlet temperature tracks workload with thermal lag"
+    notes: "GPU workloads produce 2-5x heat of idle racks"
+
+  - cause: crac_airflow
+    effect: zone_temperature
+    expected_weight: primary_controllable
+    lag: zone-specific
+    signature: "cold aisle temp responds to CRAC setpoint changes"
+    notes: "Real plenum pressure varies from CFD design assumptions"
+
+  - cause: ambient_temperature
+    effect: economizer_effectiveness
+    expected_weight: moderate
+    lag: seasonal/diurnal
+    signature: "PUE increases above economizer threshold"
+
+  - cause: rack_configuration
+    effect: recirculation
+    expected_weight: low-moderate
+    lag: quasi-static
+    signature: "persistent hot spots uncorrelated with workload"
+    notes: "Missing blanking panels, open cable cutouts"
+
+  - cause: floor_tile_config
+    effect: airflow_distribution
+    expected_weight: moderate
+    lag: quasi-static
+    signature: "systematic temperature gradient from CRAC-proximal to distal"
+
+# --- INTERACTIONS ---
+# Known multi-factor relationships the model should look for.
+
+interactions:
+  - factors: [it_workload, crac_airflow]
+    type: primary_dynamic_pair
+    note: "workload creates heat, CRAC responds"
+
+  - factors: [it_workload, crac_airflow, ambient_temperature]
+    type: three_way
+    note: "ambient modulates CRAC effectiveness"
+
+  - factors: [rack_configuration, it_workload]
+    type: non_linear
+    note: "recirculation worsens non-linearly under high load"
+
+# --- KNOWN GAPS ---
+# Things the prior explicitly does NOT model. Seeds curiosity triggers.
+
+known_gaps:
+  - "Server-level fan speed variation"
+  - "Humidity effects on cooling efficiency"
+  - "Adjacent zone coupling"
+
+# --- BUILD OPTIONS ---
+
+build:
+  initial_certainty: from_source    # from_source | fixed | custom_map
+  curiosity_threshold: 0.70         # edges below this trigger investigation
+  max_nodes: 50                     # graph complexity limit for MCU deployment
+  target_device: mcu                # mcu | edge | cloud

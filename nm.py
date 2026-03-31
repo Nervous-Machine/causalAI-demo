@@ -449,36 +449,41 @@ DOMAIN_DEPLOY_DATA = {
         "nl_query": "Why did this batch have elevated surface roughness?",
     },
     "data-centers": {
-        "hardware": "On-premises inference server, existing data center compute",
+        "hardware": "NVIDIA Jetson Orin, rack-mounted edge server",
+        "hardware_cloud": "On-premises inference server, existing data center compute",
         "json_excerpt": [
             '  {',
             '    "domain": "thermal_management",',
+            '    "prior_source": "llm_training_data",',
             '    "edges": [',
             '      {',
             '        "source": "it_workload",',
             '        "target": "zone_temperature",',
-            '        "certainty": 0.92,',
+            '        "certainty": 0.30,',
             '        "mechanism": "heat_dissipation",',
-            '        "validation_cycles": 4821,',
+            '        "prior_basis": "llm_training_data",',
+            '        "validation_cycles": 0,',
             '        "thresholds": { "workload_warn_kw": 45, "temp_crit_c": 35 }',
             '      },',
             '      {',
             '        "source": "zone_temperature",',
             '        "target": "cooling_power",',
-            '        "certainty": 0.90,',
+            '        "certainty": 0.30,',
             '        "mechanism": "crac_control_response",',
-            '        "validation_cycles": 3910',
+            '        "prior_basis": "llm_training_data",',
+            '        "validation_cycles": 0',
             '      }',
             '    ]',
             '  }',
         ],
         "capabilities": [
-            "Predict: workload spike → estimate zone temperature rise before alarms trigger",
-            "Optimize: adjust CRAC setpoints proactively to minimize PUE",
-            "Diagnose: 'Why is zone 3 running 4°C above setpoint?'",
-            "Update:  new rack telemetry refines thermal model without retraining",
+            "Identify: which causal edges does the thermal sim get wrong, and by how much?",
+            "Explain:  why does the sim underpredict zone 3 temp? (recirculation not modeled)",
+            "Rank:     which sim assumptions have the lowest certainty against real telemetry?",
+            "Refine:   new rack data tightens the sim-to-real gap without re-running CFD",
+            "Bonus:    once deployed, same graph supports live diagnostics and control",
         ],
-        "nl_query": "Why is zone 3 running 4°C above setpoint?",
+        "nl_query": "Why does our thermal sim underpredict zone 3 temperature by 4°C?",
     },
 }
 
@@ -1251,7 +1256,9 @@ Register all endpoints first, then create validation pipelines for each."""
             print()
             print(f"  Feedback configured for all {len(edges)} pipelines")
             print()
-            print(f"  ✓ Validation pipelines deployed [{domain}]. Run 'nm learn' to start.")
+            deploy_target = DOMAIN_DEPLOY_TARGETS.get(domain, "edge_gpu")
+            print(f"  ✓ Validation pipelines ready [{domain}].")
+            print(f"  Next: nm deploy --target {deploy_target}  (compile graph + validation + learning for device)")
         else:
             # Default MCU example (original)
             print("  REGISTERING VALIDATION ENDPOINTS")
@@ -1352,9 +1359,11 @@ Format output for terminal readability."""
         print(f"    Low (Z < 0.50):              {low} edges")
         print()
         if high > 0:
-            print(f"  ✓ {high} edge(s) ready for injection. Run 'nm inject'.")
+            print(f"  ✓ {high} edge(s) at Z ≥ 0.85 — validated.")
+            print(f"    nm inject  (create LoRA adapter for edge/cloud targets)")
+            print(f"    nm fleet   (contribute high-certainty vectors to global graph)")
         else:
-            print(f"  ⟳ No edges at injection threshold yet. Run 'nm learn --cycles {args.cycles + 5}'.")
+            print(f"  ⟳ No edges at Z ≥ 0.85 yet. Run 'nm learn --cycles {args.cycles + 5}'.")
         return
 
     for cycle in range(1, args.cycles + 1):
@@ -1477,7 +1486,8 @@ Use simple ASCII formatting — no markdown."""
             print("  ├── power_rail_monitor      ✓ active    last signal: 3s ago")
             print("  └── vibration_table_daq     ✓ active    last signal: 8s ago")
         print()
-        print("  Next: 'nm learn --cycles 3' to push remaining edges past Z=0.85")
+        deploy_target = DOMAIN_DEPLOY_TARGETS.get(domain, "edge_gpu")
+        print(f"  Next: nm deploy --target {deploy_target}  (compile graph + validation + learning for device)")
         return
 
     result = call_with_mcp(system, user, servers)
@@ -1745,7 +1755,7 @@ Your job: compile the trained adapter for the target platform using the
 Domain Heads server compile_for_edge.
 
 Target platforms:
-- microcontroller: Pure causal graph, no neural components. C implementation.
+- microcontroller: Pure causal graph, no neural components. Rust #![no_std].
   Tiny footprint. For sensors, IoT, embedded systems.
 - edge_gpu: Quantized 4-bit base + adapter. ~4-8GB for small models.
   For robots, drones, vehicles, edge servers.
@@ -1758,7 +1768,7 @@ Report: artifact size, deployment instructions, what's included."""
 
     targets = {
         "microcontroller": {
-            "desc": "Pure causal graph (no neural). C inference engine.",
+            "desc": "Pure causal graph (no neural). Rust, #![no_std].",
             "size": "~50KB",
             "use": "Sensors, IoT, embedded systems"
         },
@@ -1776,11 +1786,18 @@ Report: artifact size, deployment instructions, what's included."""
 
     t = targets.get(target, targets["edge_gpu"])
 
-    print(f"  Base:    {base_model}")
-    print(f"  Target:  {target}")
-    print(f"  Format:  {t['desc']}")
-    print(f"  Size:    {t['size']}")
-    print(f"  Use:     {t['use']}")
+    if target == "microcontroller":
+        print("  Target:  microcontroller")
+        print(f"  Format:  {t['desc']}")
+        print(f"  Size:    {t['size']}")
+        print(f"  Use:     {t['use']}")
+        print("  Note:    No LLM — pure causal graph compiled to Rust (#![no_std])")
+    else:
+        print(f"  Base:    {base_model}")
+        print(f"  Target:  {target}")
+        print(f"  Format:  {t['desc']}")
+        print(f"  Size:    {t['size']}")
+        print(f"  Use:     {t['use']}")
     print()
 
     if not DOMAIN_HEADS_MCP_URL:
@@ -1788,15 +1805,18 @@ Report: artifact size, deployment instructions, what's included."""
         ddata = DOMAIN_DEPLOY_DATA.get(domain)
 
         if target == "microcontroller":
-            print("  ARTIFACT:")
-            print("  ├── causal_graph.json        48KB   (validated causal edges + metadata)")
-            print("  ├── inference_engine.c        12KB   (causal traversal + update logic)")
-            print("  └── nm_config.h                2KB   (thresholds, edge IDs)")
+            print("  COMPILED ARTIFACTS:")
+            print("  ├── causal_graph.json        48KB   (prior causal edges + metadata)")
+            print("  ├── nm_graph.rs               6KB   (graph traversal + diagnosis)")
+            print("  ├── nm_validate.rs             3KB   (sim-to-real gap detection)")
+            print("  ├── nm_learn.rs                4KB   (on-device certainty update)")
+            print("  ├── lib.rs                     1KB   (crate root, #![no_std])")
+            print("  └── Cargo.toml                 1KB   (embedded target + libm)")
             print()
-            print("  No neural components. Pure causal graph reasoning.")
+            print("  No neural components. Pure causal graph + validation + learning.")
             print("  Runs on any MCU with 64KB+ RAM — AMD Xilinx, STM32, ESP32, etc.")
             print()
-            print("  ── REVIEWABLE: causal_graph.json (excerpt) ──")
+            print("  ── causal_graph.json (excerpt) ──")
             print()
             if ddata:
                 for line in ddata["json_excerpt"]:
@@ -1824,89 +1844,296 @@ Report: artifact size, deployment instructions, what's included."""
                 print('    ]')
                 print('  }')
             print()
-            print("  ── REVIEWABLE: inference_engine.c (excerpt) ──")
+
+            # Domain-specific compiled Rust code
+            if domain == "data-centers":
+                print("  ── nm_graph.rs ──")
+                print()
+                print("  //! Causal graph traversal for thermal management")
+                print("  //! Compiled by: nm deploy --target microcontroller")
+                print("  //! Domain: data-centers / thermal_management")
+                print("  //! Prior source: llm_training_data (Z₀ = 0.30)")
+                print("  //! Edges learn on-device toward Z ≥ 0.85")
+                print()
+                print("  use crate::{Mechanism::*, NodeId::*};")
+                print()
+                print("  #[derive(Clone)]")
+                print("  pub struct CausalEdge {")
+                print("      pub source:    NodeId,")
+                print("      pub target:    NodeId,")
+                print("      pub certainty: f32,       // Z₀ — starts at prior, learns toward 1.0")
+                print("      pub warn:      f32,")
+                print("      pub crit:      f32,")
+                print("      pub mechanism: Mechanism,")
+                print("  }")
+                print()
+                print("  pub static THERMAL_GRAPH: &[CausalEdge] = &[")
+                print("      //                  source             target           Z₀    warn    crit")
+                print("      CausalEdge { source: ItWorkload,       target: ZoneTemp, certainty: 0.30, warn: 45.0, crit: 35.0, mechanism: HeatDissipation },")
+                print("      CausalEdge { source: CracAirflow,      target: ZoneTemp, certainty: 0.30, warn: 2800., crit: 3200., mechanism: ConvectiveCooling },")
+                print("      CausalEdge { source: AmbientTemp,      target: ZoneTemp, certainty: 0.30, warn: 32.0, crit: 38.0, mechanism: EconomizerLink },")
+                print("      CausalEdge { source: RackConfig,       target: ZoneTemp, certainty: 0.30, warn: 0.70, crit: 0.50, mechanism: Recirculation },")
+                print("      CausalEdge { source: FloorTileLayout,  target: ZoneTemp, certainty: 0.30, warn: 40.0, crit: 55.0, mechanism: AirflowDist },")
+                print("      CausalEdge { source: ZoneTemp,         target: CoolingPower, certainty: 0.30, warn: 28.0, crit: 32.0, mechanism: CracResponse },")
+                print("      CausalEdge { source: ZoneTemp,         target: ThermalAlarm, certainty: 0.30, warn: 32.0, crit: 35.0, mechanism: ThresholdTrigger },")
+                print("  ];")
+                print()
+                print("  pub fn diagnose(graph: &[CausalEdge], reading: &SensorReading) -> Diagnosis {")
+                print("      let mut diagnosis = Diagnosis::default();")
+                print("      for edge in graph.iter().filter(|e| e.source == reading.node) {")
+                print("          let risk = edge.certainty * normalize(reading.value, edge.warn, edge.crit);")
+                print("          match risk {")
+                print("              r if r > RISK_CRIT => diagnosis.push(Alert::critical(edge.target, r)),")
+                print("              r if r > RISK_WARN => diagnosis.push(Alert::warning(edge.target, r)),")
+                print("              _ => {}")
+                print("          }")
+                print("      }")
+                print("      diagnosis")
+                print("  }")
+                print()
+                print("  ── nm_validate.rs ──")
+                print()
+                print("  //! Sim-to-real gap detection")
+                print("  //! ε = |sim_predicted - measured| zone temp")
+                print("  //! Exposes where the thermal sim diverges from reality")
+                print()
+                print("  use crate::nm_graph::{CausalEdge, THERMAL_GRAPH, NodeId::ZoneTemp};")
+                print()
+                print("  pub fn predict_zone_temp(graph: &[CausalEdge], ctx: &Context) -> f32 {")
+                print("      graph.iter()")
+                print("          .filter(|e| e.target == ZoneTemp)")
+                print("          .fold(ctx.ambient_baseline, |acc, e| {")
+                print("              acc + e.certainty * ctx.latest[e.source] * e.coefficient")
+                print("          })")
+                print("  }")
+                print()
+                print("  pub fn compute_gap(graph: &[CausalEdge], ctx: &mut Context, measured: f32) -> f32 {")
+                print("      let predicted = predict_zone_temp(graph, ctx);")
+                print("      let gap = (predicted - measured).abs();")
+                print("      ctx.last_gap = gap;")
+                print("      ctx.cumulative_gap += gap;")
+                print("      ctx.validation_cycles += 1;")
+                print("      gap")
+                print("  }")
+                print()
+                print("  ── nm_learn.rs ──")
+                print()
+                print("  //! On-device certainty update")
+                print("  //! η(Z) = 1/(1 + e^(10*(Z - 0.5)))")
+                print()
+                print("  use libm::expf;")
+                print("  use crate::nm_graph::CausalEdge;")
+                print()
+                print("  fn learning_rate(z: f32) -> f32 {")
+                print("      1.0 / (1.0 + expf(10.0 * (z - 0.5)))")
+                print("  }")
+                print()
+                print("  pub fn update_weights(graph: &mut [CausalEdge], gap: f32, gap_threshold: f32) {")
+                print("      for edge in graph.iter_mut() {")
+                print("          let eta = learning_rate(edge.certainty);")
+                print("          if gap < gap_threshold {")
+                print("              edge.certainty += eta * (1.0 - edge.certainty) * 0.01;")
+                print("          } else {")
+                print("              edge.certainty -= eta * edge.certainty * 0.005;")
+                print("          }")
+                print("          edge.certainty = edge.certainty.clamp(0.0, 1.0);")
+                print("      }")
+                print("  }")
+                print()
+                print("  ── lib.rs ──")
+                print()
+                print("  #![no_std]")
+                print()
+                print("  pub mod nm_graph;")
+                print("  pub mod nm_validate;")
+                print("  pub mod nm_learn;")
+                print()
+                print("  pub const RISK_WARN: f32 = 0.6;")
+                print("  pub const RISK_CRIT: f32 = 0.85;")
+                print("  pub const GAP_THRESHOLD: f32 = 2.0;  // deg C")
+                print()
+                print("  #[derive(Copy, Clone, PartialEq)]")
+                print("  pub enum NodeId {")
+                print("      ZoneTemp, CoolingPower, ThermalAlarm,")
+                print("      ItWorkload, CracAirflow, AmbientTemp,")
+                print("      RackConfig, FloorTileLayout,")
+                print("  }")
+                print()
+                print("  #[derive(Copy, Clone)]")
+                print("  pub enum Mechanism {")
+                print("      HeatDissipation, ConvectiveCooling, EconomizerLink,")
+                print("      Recirculation, AirflowDist, CracResponse, ThresholdTrigger,")
+                print("  }")
+            else:
+                # Generic Rust code for other domains
+                print("  ── nm_graph.rs (excerpt) ──")
+                print()
+                print("  pub struct CausalEdge {")
+                print("      pub source:    NodeId,")
+                print("      pub target:    NodeId,")
+                print("      pub certainty: f32,")
+                print("      pub warn:      f32,")
+                print("      pub crit:      f32,")
+                print("  }")
+                print()
+                print("  pub fn diagnose(graph: &[CausalEdge], reading: &SensorReading) -> Diagnosis {")
+                print("      let mut diagnosis = Diagnosis::default();")
+                print("      for edge in graph.iter().filter(|e| e.source == reading.node) {")
+                print("          let risk = edge.certainty * normalize(reading.value, edge.warn, edge.crit);")
+                print("          match risk {")
+                print("              r if r > RISK_CRIT => diagnosis.push(Alert::critical(edge.target, r)),")
+                print("              r if r > RISK_WARN => diagnosis.push(Alert::warning(edge.target, r)),")
+                print("              _ => {}")
+                print("          }")
+                print("      }")
+                print("      diagnosis")
+                print("  }")
             print()
-            print("  typedef struct {")
-            print("      const char* source;")
-            print("      const char* target;")
-            print("      float certainty;")
-            print("      float threshold_warn;")
-            print("      float threshold_crit;")
-            print("  } causal_edge_t;")
-            print()
-            print("  nm_diagnosis_t nm_diagnose(nm_ctx_t* ctx, sensor_reading_t reading) {")
-            print("      nm_diagnosis_t result = {0};")
-            print("      for (int i = 0; i < ctx->num_edges; i++) {")
-            print("          causal_edge_t* edge = &ctx->edges[i];")
-            print("          if (matches_source(edge, reading.sensor_id)) {")
-            print("              float risk = evaluate_edge(edge, reading.value);")
-            print("              if (risk > edge->threshold_crit)")
-            print('                  result.alerts[result.num_alerts++] = ')
-            print("                      (nm_alert_t){edge->target, risk, CRITICAL};")
-            print("              else if (risk > edge->threshold_warn)")
-            print("                  result.alerts[result.num_alerts++] = ")
-            print("                      (nm_alert_t){edge->target, risk, WARNING};")
-            print("          }")
-            print("      }")
-            print("      return result;")
-            print("  }")
-            print()
-            caps = ddata["capabilities"] if ddata else [
-                "Diagnose: voltage_ripple detected → predict clock_jitter risk",
-                "Predict:  thermal cycles accumulated → estimate capacitor ESR",
-                "Alert:    ESR drift approaching failure threshold → watchdog",
-                "Learn:    continue updating from onboard sensor data",
-            ]
-            print("  The model can:")
-            for cap in caps:
-                print(f"    • {cap}")
         elif target == "edge_gpu":
-            print("  ARTIFACT:")
-            print(f"  ├── base_model_q4.gguf          ~2GB  ({model_short} quantized)")
-            print("  ├── causal_graph.json             48KB")
-            print("  └── config.json                    4KB")
+            print("  COMPILED ARTIFACTS:")
+            print(f"  ├── base_model_q4.gguf          ~2GB   ({model_short} quantized)")
+            print(f"  ├── causal_adapter.safetensors   48MB   (domain LoRA weights)")
+            print("  ├── causal_graph.json             48KB   (validated causal edges)")
+            print("  ├── nm_validate.py                 4KB   (validation loop)")
+            print("  ├── nm_learn.py                    6KB   (online learning)")
+            print("  ├── config.json                    4KB   (runtime config)")
+            print("  └── deploy.sh                      2KB   (Jetson deployment script)")
             print()
             hw = ddata["hardware"] if ddata else "NVIDIA Jetson, AMD Kria, RPi 5 + accelerator"
             print(f"  Runs on: {hw}")
             print()
-            print("  ── REVIEWABLE: causal_graph.json (excerpt) ──")
+            print("  ── causal_graph.json (excerpt) ──")
             print()
             if ddata:
                 for line in ddata["json_excerpt"]:
                     print(line)
             print()
-            nl_query = ddata["nl_query"] if ddata else "Why is this system behaving unexpectedly?"
-            print(f"  Full LLM + causal reasoning. Example query:")
-            print(f"    \"{nl_query}\"")
-            print()
-            if ddata:
-                print("  The model can:")
-                for cap in ddata["capabilities"]:
-                    print(f"    • {cap}")
+
+            if domain == "data-centers":
+                print("  ── nm_validate.py ──")
+                print()
+                print("  # nm_validate.py — Sim-to-real gap detection")
+                print("  # Domain: data-centers / thermal_management")
+                print("  # ε = |sim_predicted - measured| zone temp")
+                print()
+                print("  from nm_runtime import CausalGraph, load_model")
+                print()
+                print('  graph = CausalGraph("causal_graph.json")')
+                print('  model = load_model("base_model_q4.gguf",')
+                print('                     adapter="causal_adapter.safetensors")')
+                print()
+                print("  def validate_cycle(readings: dict) -> float:")
+                print('      """Where does the sim diverge from measured reality?"""')
+                print('      sim_predicted = graph.predict("zone_temperature", readings)')
+                print('      measured = readings["rack_inlet_sensors"]["zone_temp_c"]')
+                print("      gap = abs(sim_predicted - measured)")
+                print("      graph.record_gap(gap, readings)  # tracks which edges are wrong")
+                print("      return gap")
+                print()
+                print("  ── nm_learn.py ──")
+                print()
+                print("  # nm_learn.py — Tighten sim-to-real gap on-device")
+                print("  # η(Z) = 1/(1 + e^(10*(Z - 0.5)))")
+                print()
+                print("  import math")
+                print("  from nm_runtime import CausalGraph")
+                print()
+                print("  def learning_rate(z: float) -> float:")
+                print("      return 1.0 / (1.0 + math.exp(10.0 * (z - 0.5)))")
+                print()
+                print("  def update_weights(graph: CausalGraph, gap: float):")
+                print("      for edge in graph.edges:")
+                print("          eta = learning_rate(edge.certainty)")
+                print('          if gap < graph.config["gap_threshold"]:')
+                print("              edge.certainty += eta * (1.0 - edge.certainty) * 0.01")
+                print("          else:")
+                print("              edge.certainty -= eta * edge.certainty * 0.005")
+                print("          edge.certainty = max(0.0, min(1.0, edge.certainty))")
+                print("          edge.validation_cycles += 1")
+                print("      graph.save()")
+                print()
+
         elif target == "cloud":
-            print("  ARTIFACT:")
-            print(f"  ├── base_model.safetensors       ~8GB  ({model_short})")
-            print("  ├── causal_graph.json               48KB")
-            print("  └── config.json                      4KB")
+            print("  COMPILED ARTIFACTS:")
+            print(f"  ├── base_model.safetensors       ~8GB   ({model_short} fp16)")
+            print(f"  ├── causal_adapter.safetensors    96MB   (domain LoRA weights)")
+            print("  ├── causal_graph.json               48KB   (validated causal edges)")
+            print("  ├── nm_validate.py                   4KB   (validation loop)")
+            print("  ├── nm_learn.py                      6KB   (online learning)")
+            print("  ├── config.json                      4KB   (runtime config)")
+            print("  └── docker-compose.yaml              2KB   (container deployment)")
             print()
-            hw = ddata["hardware"] if ddata else "any inference server for fleet-wide monitoring"
+            hw = ddata.get("hardware_cloud", ddata["hardware"]) if ddata else "any inference server for fleet-wide monitoring"
             print(f"  Deploy to: {hw}")
             print()
             if ddata:
-                print("  ── REVIEWABLE: causal_graph.json (excerpt) ──")
+                print("  ── causal_graph.json (excerpt) ──")
                 print()
                 for line in ddata["json_excerpt"]:
                     print(line)
                 print()
-                nl_query = ddata["nl_query"]
-                print(f"  Full LLM + causal reasoning. Example query:")
-                print(f"    \"{nl_query}\"")
+
+            if domain == "data-centers":
+                print("  ── nm_validate.py ──")
                 print()
-                print("  The model can:")
-                for cap in ddata["capabilities"]:
-                    print(f"    • {cap}")
+                print("  # nm_validate.py — Sim-to-real gap detection")
+                print("  # Domain: data-centers / thermal_management")
+                print("  # ε = |sim_predicted - measured| zone temp")
+                print()
+                print("  from nm_runtime import CausalGraph, load_model")
+                print()
+                print('  graph = CausalGraph("causal_graph.json")')
+                print('  model = load_model("base_model.safetensors",')
+                print('                     adapter="causal_adapter.safetensors")')
+                print()
+                print("  def validate_cycle(readings: dict) -> float:")
+                print('      """Where does the sim diverge from measured reality?"""')
+                print('      sim_predicted = graph.predict("zone_temperature", readings)')
+                print('      measured = readings["rack_inlet_sensors"]["zone_temp_c"]')
+                print("      gap = abs(sim_predicted - measured)")
+                print("      graph.record_gap(gap, readings)  # tracks which edges are wrong")
+                print("      return gap")
+                print()
+                print("  def run_fleet_validation(endpoints: list, interval=60):")
+                print('      """Scan all zones for sim-to-real divergence."""')
+                print("      while True:")
+                print("          for ep in endpoints:")
+                print("              readings = fetch_telemetry(ep)")
+                print("              gap = validate_cycle(readings)")
+                print('              if gap > graph.config["gap_threshold"]:')
+                print("                  model.inject_correction(graph, error)")
+                print("          time.sleep(interval)")
+                print()
+                print("  ── nm_learn.py ──")
+                print()
+                print("  # nm_learn.py — Tighten sim-to-real gap across fleet")
+                print("  # η(Z) = 1/(1 + e^(10*(Z - 0.5)))")
+                print()
+                print("  import math")
+                print("  from nm_runtime import CausalGraph")
+                print()
+                print("  def learning_rate(z: float) -> float:")
+                print("      return 1.0 / (1.0 + math.exp(10.0 * (z - 0.5)))")
+                print()
+                print("  def update_weights(graph: CausalGraph, gap: float):")
+                print("      for edge in graph.edges:")
+                print("          eta = learning_rate(edge.certainty)")
+                print('          if gap < graph.config["gap_threshold"]:')
+                print("              edge.certainty += eta * (1.0 - edge.certainty) * 0.01")
+                print("          else:")
+                print("              edge.certainty -= eta * edge.certainty * 0.005")
+                print("          edge.certainty = max(0.0, min(1.0, edge.certainty))")
+                print("          edge.validation_cycles += 1")
+                print("      graph.save()")
+                print()
+
         print()
-        print("  Next: nm update  (push new learning without retraining)")
+        if target == "microcontroller":
+            print("  Next: nm learn --cycles 50  (watch certainty evolve from Z₀ = 0.30)")
+            print("        nm fleet             (when Z ≥ 0.85, contribute vectors to global graph)")
+        else:
+            print("  Next: nm learn --cycles 50  (watch certainty evolve from prior)")
+            print("        nm inject            (when Z ≥ 0.85, create LoRA adapter)")
         return
 
     result = call_with_mcp(

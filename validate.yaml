@@ -1,0 +1,151 @@
+# nm validate config — schema v0.1
+# The validate config defines HOW to learn: data endpoints, learning
+# parameters, success criteria, and deployment targets.
+# This is the structured format. Natural language .md files are also valid.
+
+domain: data-centers
+facility_id: den-01               # per-facility identifier
+entity_scope: data-hall-b         # what this model covers
+
+# --- DATA ENDPOINTS ---
+# Where sensor data comes from. Each endpoint maps to one or more
+# nodes in the causal graph.
+
+endpoints:
+
+  - name: rack_inlet_temperature
+    source: dcim                  # dcim | bms | pdu | weather | prometheus | manual
+    protocol: http                # http | bacnet | modbus | snmp | mqtt | file
+    endpoint: "http://dcim.local:8080/api/sensors/rack_inlet"
+    cadence: 60                   # seconds
+    format:
+      fields: [timestamp, rack_id, zone_id, inlet_temp_c, position]
+    maps_to: [zone_temperature]   # which graph nodes this feeds
+    role: primary_error_signal    # primary_error_signal | input | context | static
+
+  - name: rack_exhaust_temperature
+    source: dcim
+    protocol: http
+    endpoint: "http://dcim.local:8080/api/sensors/rack_exhaust"
+    cadence: 60
+    format:
+      fields: [timestamp, rack_id, zone_id, exhaust_temp_c, delta_t_c]
+    maps_to: [zone_temperature, recirculation]
+    role: input
+
+  - name: rack_power
+    source: pdu
+    protocol: snmp                # or http — depends on PDU vendor
+    endpoint: "snmp://pdu-rack01.local"
+    cadence: 60
+    format:
+      fields: [timestamp, rack_id, pdu_id, power_kw, current_a, voltage_v]
+    maps_to: [it_workload]
+    role: input
+    notes: "Vertiv iPDU, Raritan, or ServerTech"
+
+  - name: crac_telemetry
+    source: bms
+    protocol: bacnet
+    endpoint: "bacnet://192.168.20.10:47808"
+    cadence: 60
+    format:
+      fields: [timestamp, unit_id, supply_temp_c, return_temp_c, fan_speed_pct, cooling_capacity_kw, mode]
+    maps_to: [crac_airflow]
+    role: input
+
+  - name: outside_air
+    source: weather
+    protocol: http
+    endpoint: "https://api.openweathermap.org/data/3.0/onecall"
+    cadence: 300
+    format:
+      fields: [timestamp, temp_c, humidity_pct, dewpoint_c, wet_bulb_c]
+    maps_to: [ambient_temperature]
+    role: context
+
+  - name: rack_layout
+    source: dcim
+    protocol: http
+    endpoint: "http://dcim.local:8080/api/assets/rack_config"
+    cadence: event_driven          # updates on change, not on schedule
+    format:
+      fields: [rack_id, zone_id, row, position, ru_populated, ru_blanked, ru_open, last_audit_date]
+    maps_to: [rack_configuration]
+    role: static
+
+  # --- SIMULATION ENDPOINT (Phase 2) ---
+  # When available, the sim prediction becomes the baseline for error signals.
+  # - name: cfd_prediction
+  #   source: simulation
+  #   protocol: http
+  #   endpoint: "https://twin.vertiv.internal/api/v1/predict"
+  #   cadence: 300
+  #   format:
+  #     fields: [timestamp, zone_id, predicted_temp_c, predicted_airflow_cfm]
+  #   maps_to: [zone_temperature, crac_airflow]
+  #   role: prediction_baseline    # error = |predicted - actual|
+  #   notes: "sim-to-real gap measured continuously when this endpoint is active"
+
+# --- LEARNING PARAMETERS ---
+
+learning:
+  rate_function: eta_z            # eta_z | fixed | scheduled
+  # eta_z: η(Z) = 1/(1+e^(10*(Z-0.5))) — high learning rate when uncertain,
+  #         low when confident. Self-stabilizing.
+  convergence_threshold: 0.85     # edge is "learned" above this Z score
+  curiosity_threshold: 0.70       # below this, system flags for investigation
+  min_observations: 10            # minimum data points before updating certainty
+  max_cycles_per_session: 50
+  feedback_modes:
+    - auto_update                 # Z < 0.5: update automatically
+    - weighted_update             # 0.5 ≤ Z < 0.7: update with reduced rate
+    - flag_for_review             # 0.7 ≤ Z < 0.85: flag, don't auto-update
+    - stable                      # Z ≥ 0.85: minimal updates, edge is converged
+
+# --- VALIDATION STRATEGY ---
+# Ordered steps to validate the model against real facility behavior.
+
+validation_steps:
+
+  - name: baseline
+    description: "Collect 7 days of all feeds at steady-state workload"
+    target: "Establish per-zone thermal response characteristics"
+    duration: 7d
+
+  - name: workload_perturbation
+    description: "Migrate a known workload between racks"
+    target: "Verify model tracks thermal transient in source and destination zones"
+    requires: operations_coordination
+    duration: 4h
+
+  - name: crac_setpoint_test
+    description: "Lower one CRAC supply temperature by 2°C"
+    target: "Measure per-zone response delay and magnitude vs. prediction"
+    requires: operations_coordination
+    duration: 4h
+
+  - name: learning_cycles
+    description: "Run nm learn cycles against live data"
+    target: "Per-zone driver weights and thermal lag converge"
+    duration: 14d
+
+# --- SUCCESS CRITERIA ---
+
+success:
+  convergence: "≥80% of edges above Z=0.85 after 30 days"
+  curiosity_resolved: "≥1 curiosity trigger resolved with additional data"
+  accuracy: "predicted vs. actual zone temperature within ±1.5°C at steady state"
+  gap_identified: "≥3 facility-specific deviations from simulation identified and quantified"
+
+# --- DEPLOYMENT TARGET ---
+
+deployment:
+  target: mcu                      # mcu | jetson | cloud
+  power_budget: 5W
+  model_size_limit: 50KB
+  sync:
+    protocol: mqtt                 # mqtt | http | lorawan
+    payload_size: 1KB              # per fleet sync update
+    interval: 3600                 # seconds between fleet syncs
+  compile_format: onnx             # onnx | tflite | native_c
