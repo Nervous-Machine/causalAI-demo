@@ -2709,7 +2709,7 @@ Compile the most recently trained functional adapter for: {target}
 Use Functional Heads: compile_functional_adapter with the adapter ID and target.
 
 Target platforms:
-- microcontroller: Pure functional graph + C inference. Tiny footprint.
+- microcontroller: Pure functional graph + Rust inference. Tiny footprint.
 - edge_gpu: Quantized 4-bit base + functional adapters. ~4-8GB.
 - cloud: Full precision. For enterprise deployment.
 
@@ -2732,7 +2732,7 @@ Report: artifact contents, sizes, deployment instructions."""
             print("  ARTIFACT:")
             print("  |-- functional_graph.json     32KB  (3 primitives)")
             print("  |-- lookup_tables.bin         18KB  (precomputed)")
-            print("  +-- inference_engine.c        14KB")
+            print("  +-- inference_engine.rs       14KB")
             print()
             print("  No neural components. Pure functional reasoning.")
             print("  Runs on any MCU with 64KB+ RAM.")
