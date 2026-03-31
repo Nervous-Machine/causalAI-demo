@@ -1758,7 +1758,7 @@ Report: artifact size, deployment instructions, what's included."""
 
     targets = {
         "microcontroller": {
-            "desc": "Pure causal graph (no neural). C inference engine.",
+            "desc": "Pure causal graph (no neural). Rust inference engine.",
             "size": "~50KB",
             "use": "Sensors, IoT, embedded systems"
         },
@@ -1790,7 +1790,7 @@ Report: artifact size, deployment instructions, what's included."""
         if target == "microcontroller":
             print("  ARTIFACT:")
             print("  ├── causal_graph.json        48KB   (validated causal edges + metadata)")
-            print("  ├── inference_engine.c        12KB   (causal traversal + update logic)")
+            print("  ├── inference_engine.rs       12KB   (causal traversal + update logic)")
             print("  └── nm_config.h                2KB   (thresholds, edge IDs)")
             print()
             print("  No neural components. Pure causal graph reasoning.")
@@ -1824,7 +1824,7 @@ Report: artifact size, deployment instructions, what's included."""
                 print('    ]')
                 print('  }')
             print()
-            print("  ── REVIEWABLE: inference_engine.c (excerpt) ──")
+            print("  ── REVIEWABLE: inference_engine.rs (excerpt) ──")
             print()
             print("  typedef struct {")
             print("      const char* source;")
@@ -2482,7 +2482,7 @@ Compile the most recently trained functional adapter for: {target}
 Use Functional Heads: compile_functional_adapter with the adapter ID and target.
 
 Target platforms:
-- microcontroller: Pure functional graph + C inference. Tiny footprint.
+- microcontroller: Pure functional graph + Rust inference. Tiny footprint.
 - edge_gpu: Quantized 4-bit base + functional adapters. ~4-8GB.
 - cloud: Full precision. For enterprise deployment.
 
@@ -2505,7 +2505,7 @@ Report: artifact contents, sizes, deployment instructions."""
             print("  ARTIFACT:")
             print("  |-- functional_graph.json     32KB  (3 primitives)")
             print("  |-- lookup_tables.bin         18KB  (precomputed)")
-            print("  +-- inference_engine.c        14KB")
+            print("  +-- inference_engine.rs       14KB")
             print()
             print("  No neural components. Pure functional reasoning.")
             print("  Runs on any MCU with 64KB+ RAM.")
