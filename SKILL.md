@@ -102,9 +102,9 @@ Explain to the user:
   - **data-centers**: cloud inference server (fleet-wide monitoring)
 - These defaults reflect real deployment environments — but all targets are interchangeable
 - To see pure causal graph inference on a tiny device, run `nm deploy --target microcontroller`:
-  - Output is a 48KB JSON graph + 12KB C inference engine + 2KB config header
+  - Output is a 48KB JSON graph + 12KB Rust inference engine + 2KB config header
   - Runs on any MCU with 64KB+ RAM (~$2 device): STM32, ESP32, AMD Xilinx, etc.
-  - No neural network, no cloud, no GPU — just causal graph traversal compiled to C
+  - No neural network, no cloud, no GPU — just causal graph traversal compiled to Rust
 - Point out the **reviewable code** — the output shows the causal graph JSON and the inference engine source
 - Right now the Z scores are low — the graph is a hypothesis. Next we validate it.
 

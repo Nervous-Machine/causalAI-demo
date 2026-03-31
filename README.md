@@ -87,11 +87,11 @@ Every stage produces reviewable artifacts — your domain experts can inspect th
 
 | Target | What deploys | Runs on | Size |
 |--------|-------------|---------|------|
-| `microcontroller` | Causal graph + C inference engine | Any MCU, 64KB+ RAM (~$2 device) | ~50KB |
+| `microcontroller` | Causal graph + Rust inference engine | Any MCU, 64KB+ RAM (~$2 device) | ~50KB |
 | `edge_gpu` | Quantized LLM + causal graph | Jetson Orin, Kria, RPi 5 | ~2GB |
 | `cloud` | Full precision LLM + causal graph | Any inference server | ~8GB |
 
-Domain branches default to the most likely available hardware for each vertical — `space`, `robotics`, and `manufacturing` default to `edge_gpu`; `data-centers` defaults to `cloud`. All targets are interchangeable: pass `--target microcontroller` to any domain to see pure causal graph inference compiled to C with no neural network, no cloud dependency, and no GPU — running on any MCU with 64KB+ RAM.
+Domain branches default to the most likely available hardware for each vertical — `space`, `robotics`, and `manufacturing` default to `edge_gpu`; `data-centers` defaults to `cloud`. All targets are interchangeable: pass `--target microcontroller` to any domain to see pure causal graph inference compiled to Rust with no neural network, no cloud dependency, and no GPU — running on any MCU with 64KB+ RAM.
 
 ## How Certainty Works
 
