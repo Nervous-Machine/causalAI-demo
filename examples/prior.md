@@ -3,7 +3,7 @@
 
 ## Domain
 Microcontroller reliability for automotive ECU applications.
-Target: predict and diagnose failure modes from environmental stressors
+Target: predict and detect failure modes from environmental stressors
 and operational telemetry.
 
 ## Causal Relationships
