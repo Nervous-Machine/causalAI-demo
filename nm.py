@@ -1826,36 +1826,36 @@ Report: artifact size, deployment instructions, what's included."""
             print()
             print("  ── REVIEWABLE: inference_engine.rs (excerpt) ──")
             print()
-            print("  typedef struct {")
-            print("      const char* source;")
-            print("      const char* target;")
-            print("      float certainty;")
-            print("      float threshold_warn;")
-            print("      float threshold_crit;")
-            print("  } causal_edge_t;")
+            print("  struct CausalEdge {")
+            print("      source: &'static str,")
+            print("      target: &'static str,")
+            print("      z: f32,          // certainty score")
+            print("      eta: f32,        // learning rate (decreases as z climbs)")
+            print("  }")
             print()
-            print("  nm_diagnosis_t nm_diagnose(nm_ctx_t* ctx, sensor_reading_t reading) {")
-            print("      nm_diagnosis_t result = {0};")
-            print("      for (int i = 0; i < ctx->num_edges; i++) {")
-            print("          causal_edge_t* edge = &ctx->edges[i];")
-            print("          if (matches_source(edge, reading.sensor_id)) {")
-            print("              float risk = evaluate_edge(edge, reading.value);")
-            print("              if (risk > edge->threshold_crit)")
-            print('                  result.alerts[result.num_alerts++] = ')
-            print("                      (nm_alert_t){edge->target, risk, CRITICAL};")
-            print("              else if (risk > edge->threshold_warn)")
-            print("                  result.alerts[result.num_alerts++] = ")
-            print("                      (nm_alert_t){edge->target, risk, WARNING};")
+            print("  fn predict(edge: &CausalEdge, reading: f32) -> f32 {")
+            print("      edge.z * reading  // predicted effect scaled by certainty")
+            print("  }")
+            print()
+            print("  fn learn_cycle(edges: &mut [CausalEdge], readings: &[SensorReading]) {")
+            print("      for edge in edges.iter_mut() {")
+            print("          if let Some(r) = readings.iter().find(|r| r.source == edge.source) {")
+            print("              let predicted = predict(edge, r.value);")
+            print("              let observed = r.downstream_actual;")
+            print("              let error = (predicted - observed).abs();")
+            print("              // error drives certainty: small error → z climbs, eta shrinks")
+            print("              edge.z += edge.eta * (1.0 - error);")
+            print("              edge.z = edge.z.clamp(0.0, 1.0);")
+            print("              edge.eta *= 0.98;  // decay learning rate as graph converges")
             print("          }")
             print("      }")
-            print("      return result;")
             print("  }")
             print()
             caps = ddata["capabilities"] if ddata else [
-                "Diagnose: voltage_ripple detected → predict clock_jitter risk",
-                "Predict:  thermal cycles accumulated → estimate capacitor ESR",
-                "Alert:    ESR drift approaching failure threshold → watchdog",
-                "Learn:    continue updating from onboard sensor data",
+                "Predict:  causal graph predicts downstream sensor values each cycle",
+                "Learn:    compare prediction to observed reality, update Z and η",
+                "Converge: error shrinks → Z climbs above 0.85 → edge is validated",
+                "Detect:   once converged, divergence from learned normal = anomaly",
             ]
             print("  The model can:")
             for cap in caps:
