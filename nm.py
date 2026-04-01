@@ -377,10 +377,10 @@ DOMAIN_DEPLOY_DATA = {
             '  }',
         ],
         "capabilities": [
-            "Predict: solar EUV spike → estimate density increase magnitude and timing",
-            "Alert:   drag deviation > 15% MAPE → conjunction risk elevated",
-            "Diagnose: 'Why did this maneuver consume 3× expected ΔV?'",
-            "Update:  new GRACE-FO passes refine estimates without retraining",
+            "Predict:  solar EUV spike → estimate density increase magnitude and timing",
+            "Learn:    prediction-error on drag → refine atmospheric density model",
+            "Detect:   ΔV anomaly — maneuver consumed 3× predicted, flag causal divergence",
+            "Update:   new GRACE-FO passes refine estimates without retraining",
         ],
         "nl_query": "Why is drag higher than predicted on this orbital pass?",
     },
@@ -409,10 +409,10 @@ DOMAIN_DEPLOY_DATA = {
             '  }',
         ],
         "capabilities": [
-            "Predict: joint friction increase → estimate trajectory error before it happens",
-            "Alert:   payload variance > threshold → grasp force compensation required",
-            "Diagnose: 'Why is the end-effector missing the target position?'",
-            "Update:  new encoder cycles refine friction model without retraining",
+            "Predict:  joint friction increase → estimate trajectory error before it happens",
+            "Learn:    prediction-error on position → refine sim-to-real friction model",
+            "Detect:   end-effector drift — position error diverges from learned normal",
+            "Update:   new encoder cycles refine friction model without retraining",
         ],
         "nl_query": "Why is the end-effector missing the target position?",
     },
@@ -441,10 +441,10 @@ DOMAIN_DEPLOY_DATA = {
             '  }',
         ],
         "capabilities": [
-            "Predict: tool wear rate → estimate remaining useful life and scrap risk",
-            "Alert:   dimensional deviation approaching tolerance limit → intervention",
-            "Diagnose: 'Why did this batch have elevated surface roughness?'",
-            "Update:  new CMM inspection results refine tolerance model without retraining",
+            "Predict:  tool wear rate → estimate remaining useful life and scrap risk",
+            "Learn:    prediction-error on dimensions → refine wear-to-tolerance model",
+            "Detect:   surface roughness anomaly — batch diverges from learned normal",
+            "Update:   new CMM inspection results refine tolerance model without retraining",
         ],
         "nl_query": "Why did this batch have elevated surface roughness?",
     },
@@ -481,7 +481,7 @@ DOMAIN_DEPLOY_DATA = {
             "Explain:  why does the sim underpredict zone 3 temp? (recirculation not modeled)",
             "Rank:     which sim assumptions have the lowest certainty against real telemetry?",
             "Refine:   new rack data tightens the sim-to-real gap without re-running CFD",
-            "Bonus:    once deployed, same graph supports live diagnostics and control",
+            "Bonus:    once deployed, same graph supports live anomaly detection and control",
         ],
         "nl_query": "Why does our thermal sim underpredict zone 3 temperature by 4°C?",
     },
@@ -714,7 +714,7 @@ DOMAIN_TRAIN_DATA = {
         "auroc":       ("0.94",  "trajectory_error → cycle_failure"),
         "calibration": "0.91",
         "retention":   "95.8%",
-        "capability":  "sim-to-real gap diagnosis and trajectory error prediction",
+        "capability":  "sim-to-real gap detection and trajectory error prediction",
     },
     "manufacturing": {
         "accuracy":    ("93.1%", "42.6%", "process deviation classification"),
@@ -1695,7 +1695,7 @@ This should be FAST — minutes, not hours — because only ~5-10M params update
     if not DOMAIN_HEADS_MCP_URL:
         domain = detect_domain()
         tdata = DOMAIN_TRAIN_DATA.get(domain, {
-            "accuracy":    ("84.7%", "43.1%", "fault diagnosis"),
+            "accuracy":    ("84.7%", "43.1%", "anomaly detection"),
             "auroc":       ("0.91",  "capacitor ESR drift"),
             "calibration": "0.89",
             "retention":   "95.2%",
@@ -1807,7 +1807,7 @@ Report: artifact size, deployment instructions, what's included."""
         if target == "microcontroller":
             print("  COMPILED ARTIFACTS:")
             print("  ├── causal_graph.json        48KB   (prior causal edges + metadata)")
-            print("  ├── nm_graph.rs               6KB   (graph traversal + diagnosis)")
+            print("  ├── nm_graph.rs               6KB   (graph traversal + prediction)")
             print("  ├── nm_validate.rs             3KB   (sim-to-real gap detection)")
             print("  ├── nm_learn.rs                4KB   (on-device certainty update)")
             print("  ├── lib.rs                     1KB   (crate root, #![no_std])")
@@ -1861,34 +1861,28 @@ Report: artifact size, deployment instructions, what's included."""
                 print("  pub struct CausalEdge {")
                 print("      pub source:    NodeId,")
                 print("      pub target:    NodeId,")
-                print("      pub certainty: f32,       // Z₀ — starts at prior, learns toward 1.0")
-                print("      pub warn:      f32,")
-                print("      pub crit:      f32,")
-                print("      pub mechanism: Mechanism,")
+                print("      pub certainty:   f32,     // Z₀ — starts at prior, learns toward 1.0")
+                print("      pub eta:         f32,     // learning rate (decays as Z climbs)")
+                print("      pub coefficient: f32,     // causal weight")
+                print("      pub mechanism:   Mechanism,")
                 print("  }")
                 print()
                 print("  pub static THERMAL_GRAPH: &[CausalEdge] = &[")
-                print("      //                  source             target           Z₀    warn    crit")
-                print("      CausalEdge { source: ItWorkload,       target: ZoneTemp, certainty: 0.30, warn: 45.0, crit: 35.0, mechanism: HeatDissipation },")
-                print("      CausalEdge { source: CracAirflow,      target: ZoneTemp, certainty: 0.30, warn: 2800., crit: 3200., mechanism: ConvectiveCooling },")
-                print("      CausalEdge { source: AmbientTemp,      target: ZoneTemp, certainty: 0.30, warn: 32.0, crit: 38.0, mechanism: EconomizerLink },")
-                print("      CausalEdge { source: RackConfig,       target: ZoneTemp, certainty: 0.30, warn: 0.70, crit: 0.50, mechanism: Recirculation },")
-                print("      CausalEdge { source: FloorTileLayout,  target: ZoneTemp, certainty: 0.30, warn: 40.0, crit: 55.0, mechanism: AirflowDist },")
-                print("      CausalEdge { source: ZoneTemp,         target: CoolingPower, certainty: 0.30, warn: 28.0, crit: 32.0, mechanism: CracResponse },")
-                print("      CausalEdge { source: ZoneTemp,         target: ThermalAlarm, certainty: 0.30, warn: 32.0, crit: 35.0, mechanism: ThresholdTrigger },")
+                print("      //                  source             target           Z₀    η      coeff")
+                print("      CausalEdge { source: ItWorkload,       target: ZoneTemp, certainty: 0.30, eta: 0.10, coefficient: 0.45, mechanism: HeatDissipation },")
+                print("      CausalEdge { source: CracAirflow,      target: ZoneTemp, certainty: 0.30, eta: 0.10, coefficient: 0.35, mechanism: ConvectiveCooling },")
+                print("      CausalEdge { source: AmbientTemp,      target: ZoneTemp, certainty: 0.30, eta: 0.10, coefficient: 0.20, mechanism: EconomizerLink },")
+                print("      CausalEdge { source: RackConfig,       target: ZoneTemp, certainty: 0.30, eta: 0.10, coefficient: 0.15, mechanism: Recirculation },")
+                print("      CausalEdge { source: FloorTileLayout,  target: ZoneTemp, certainty: 0.30, eta: 0.10, coefficient: 0.10, mechanism: AirflowDist },")
+                print("      CausalEdge { source: ZoneTemp,         target: CoolingPower, certainty: 0.30, eta: 0.10, coefficient: 0.80, mechanism: CracResponse },")
+                print("      CausalEdge { source: ZoneTemp,         target: ThermalAlarm, certainty: 0.30, eta: 0.10, coefficient: 0.90, mechanism: ThresholdTrigger },")
                 print("  ];")
+
                 print()
-                print("  pub fn diagnose(graph: &[CausalEdge], reading: &SensorReading) -> Diagnosis {")
-                print("      let mut diagnosis = Diagnosis::default();")
-                print("      for edge in graph.iter().filter(|e| e.source == reading.node) {")
-                print("          let risk = edge.certainty * normalize(reading.value, edge.warn, edge.crit);")
-                print("          match risk {")
-                print("              r if r > RISK_CRIT => diagnosis.push(Alert::critical(edge.target, r)),")
-                print("              r if r > RISK_WARN => diagnosis.push(Alert::warning(edge.target, r)),")
-                print("              _ => {}")
-                print("          }")
-                print("      }")
-                print("      diagnosis")
+                print("  pub fn predict(graph: &[CausalEdge], reading: &SensorReading) -> f32 {")
+                print("      graph.iter()")
+                print("          .filter(|e| e.source == reading.node)")
+                print("          .fold(0.0, |acc, e| acc + e.certainty * reading.value * e.coefficient)")
                 print("  }")
                 print()
                 print("  ── nm_validate.rs ──")
@@ -1969,24 +1963,26 @@ Report: artifact size, deployment instructions, what's included."""
                 print("  ── nm_graph.rs (excerpt) ──")
                 print()
                 print("  pub struct CausalEdge {")
-                print("      pub source:    NodeId,")
-                print("      pub target:    NodeId,")
-                print("      pub certainty: f32,")
-                print("      pub warn:      f32,")
-                print("      pub crit:      f32,")
+                print("      pub source:      NodeId,")
+                print("      pub target:      NodeId,")
+                print("      pub certainty:   f32,    // Z score")
+                print("      pub eta:         f32,    // learning rate (decays as Z climbs)")
+                print("      pub coefficient: f32,    // causal weight")
                 print("  }")
                 print()
-                print("  pub fn diagnose(graph: &[CausalEdge], reading: &SensorReading) -> Diagnosis {")
-                print("      let mut diagnosis = Diagnosis::default();")
-                print("      for edge in graph.iter().filter(|e| e.source == reading.node) {")
-                print("          let risk = edge.certainty * normalize(reading.value, edge.warn, edge.crit);")
-                print("          match risk {")
-                print("              r if r > RISK_CRIT => diagnosis.push(Alert::critical(edge.target, r)),")
-                print("              r if r > RISK_WARN => diagnosis.push(Alert::warning(edge.target, r)),")
-                print("              _ => {}")
-                print("          }")
+                print("  pub fn predict(graph: &[CausalEdge], reading: &SensorReading) -> f32 {")
+                print("      graph.iter()")
+                print("          .filter(|e| e.source == reading.node)")
+                print("          .fold(0.0, |acc, e| acc + e.certainty * reading.value * e.coefficient)")
+                print("  }")
+                print()
+                print("  pub fn learn_cycle(graph: &mut [CausalEdge], predicted: f32, observed: f32) {")
+                print("      let error = (predicted - observed).abs();")
+                print("      for edge in graph.iter_mut() {")
+                print("          edge.certainty += edge.eta * (1.0 - error);")
+                print("          edge.certainty = edge.certainty.clamp(0.0, 1.0);")
+                print("          edge.eta *= 0.98;  // decay as graph converges")
                 print("      }")
-                print("      diagnosis")
                 print("  }")
             print()
         elif target == "edge_gpu":
