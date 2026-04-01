@@ -377,10 +377,10 @@ DOMAIN_DEPLOY_DATA = {
             '  }',
         ],
         "capabilities": [
-            "Predict: solar EUV spike → estimate density increase magnitude and timing",
-            "Alert:   drag deviation > 15% MAPE → conjunction risk elevated",
-            "Diagnose: 'Why did this maneuver consume 3× expected ΔV?'",
-            "Update:  new GRACE-FO passes refine estimates without retraining",
+            "Predict:  solar EUV spike → estimate density increase magnitude and timing",
+            "Learn:    prediction-error on drag → refine atmospheric density model",
+            "Detect:   ΔV anomaly — maneuver consumed 3× predicted, flag causal divergence",
+            "Update:   new GRACE-FO passes refine estimates without retraining",
         ],
         "nl_query": "Why is drag higher than predicted on this orbital pass?",
     },
@@ -409,10 +409,10 @@ DOMAIN_DEPLOY_DATA = {
             '  }',
         ],
         "capabilities": [
-            "Predict: joint friction increase → estimate trajectory error before it happens",
-            "Alert:   payload variance > threshold → grasp force compensation required",
-            "Diagnose: 'Why is the end-effector missing the target position?'",
-            "Update:  new encoder cycles refine friction model without retraining",
+            "Predict:  joint friction increase → estimate trajectory error before it happens",
+            "Learn:    prediction-error on position → refine sim-to-real friction model",
+            "Detect:   end-effector drift — position error diverges from learned normal",
+            "Update:   new encoder cycles refine friction model without retraining",
         ],
         "nl_query": "Why is the end-effector missing the target position?",
     },
@@ -441,10 +441,10 @@ DOMAIN_DEPLOY_DATA = {
             '  }',
         ],
         "capabilities": [
-            "Predict: tool wear rate → estimate remaining useful life and scrap risk",
-            "Alert:   dimensional deviation approaching tolerance limit → intervention",
-            "Diagnose: 'Why did this batch have elevated surface roughness?'",
-            "Update:  new CMM inspection results refine tolerance model without retraining",
+            "Predict:  tool wear rate → estimate remaining useful life and scrap risk",
+            "Learn:    prediction-error on dimensions → refine wear-to-tolerance model",
+            "Detect:   surface roughness anomaly — batch diverges from learned normal",
+            "Update:   new CMM inspection results refine tolerance model without retraining",
         ],
         "nl_query": "Why did this batch have elevated surface roughness?",
     },
@@ -473,10 +473,10 @@ DOMAIN_DEPLOY_DATA = {
             '  }',
         ],
         "capabilities": [
-            "Predict: workload spike → estimate zone temperature rise before alarms trigger",
-            "Optimize: adjust CRAC setpoints proactively to minimize PUE",
-            "Diagnose: 'Why is zone 3 running 4°C above setpoint?'",
-            "Update:  new rack telemetry refines thermal model without retraining",
+            "Predict:  workload spike → estimate zone temperature rise before alarms trigger",
+            "Learn:    prediction-error on zone temps → refine thermal-workload model",
+            "Detect:   zone 3 anomaly — 4°C above predicted, flag causal divergence",
+            "Update:   new rack telemetry refines thermal model without retraining",
         ],
         "nl_query": "Why is zone 3 running 4°C above setpoint?",
     },
@@ -709,7 +709,7 @@ DOMAIN_TRAIN_DATA = {
         "auroc":       ("0.94",  "trajectory_error → cycle_failure"),
         "calibration": "0.91",
         "retention":   "95.8%",
-        "capability":  "sim-to-real gap diagnosis and trajectory error prediction",
+        "capability":  "sim-to-real gap detection and trajectory error prediction",
     },
     "manufacturing": {
         "accuracy":    ("93.1%", "42.6%", "process deviation classification"),
@@ -1685,7 +1685,7 @@ This should be FAST — minutes, not hours — because only ~5-10M params update
     if not DOMAIN_HEADS_MCP_URL:
         domain = detect_domain()
         tdata = DOMAIN_TRAIN_DATA.get(domain, {
-            "accuracy":    ("84.7%", "43.1%", "fault diagnosis"),
+            "accuracy":    ("84.7%", "43.1%", "anomaly detection"),
             "auroc":       ("0.91",  "capacitor ESR drift"),
             "calibration": "0.89",
             "retention":   "95.2%",
@@ -1745,7 +1745,7 @@ Your job: compile the trained adapter for the target platform using the
 Domain Heads server compile_for_edge.
 
 Target platforms:
-- microcontroller: Pure causal graph, no neural components. C implementation.
+- microcontroller: Pure causal graph, no neural components. Rust implementation.
   Tiny footprint. For sensors, IoT, embedded systems.
 - edge_gpu: Quantized 4-bit base + adapter. ~4-8GB for small models.
   For robots, drones, vehicles, edge servers.
